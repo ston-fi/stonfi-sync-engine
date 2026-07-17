@@ -1,0 +1,46 @@
+[workspace]
+members = ["."]
+resolver = "2"
+
+[package]
+name = "stonfi_sync_core"
+version = "0.0.1"
+edition = "2024"
+rust-version = "1.93"
+description = "Dependency-aware asynchronous synchronization engine"
+license = "Apache-2.0"
+repository = "https://github.com/ston-fi/stonfi-sync-engine"
+readme = "README.md"
+publish = false
+
+include = [
+    "AGENTS.md",
+    "CHANGELOG.md",
+    "Cargo.lock",
+    "Cargo.toml",
+    "LICENSE",
+    "README.md",
+    "examples/**",
+    "src/**",
+]
+
+[lib]
+name = "stonfi_sync_core"
+
+[dependencies]
+async-trait = "0.1"
+futures = "0.3"
+log = "0.4"
+parking_lot = "0.12"
+smallvec = "2.0.0-alpha.12"
+stonfi-commons-metrics = { git = "https://git.stonfi.net/ston-fi/rust/commons.git", rev = "13f0dded7826b9d4229289fb90a1cd6160dbe167" }
+strum = { version = "0.28", features = ["derive"] }
+thiserror = "2"
+tokio = { version = "1", features = ["rt", "sync", "time"] }
+
+[dev-dependencies]
+anyhow = "1"
+assertables = "9.8"
+dashmap = "6.1"
+env_logger = "0.11"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

@@ -1,0 +1,38 @@
+name: Build and test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@stable
+      - run: rustup toolchain install nightly --component rustfmt
+      - run: cargo test --all-features --locked
+      - run: cargo test --doc --locked
+      - run: cargo test --examples --locked
+      - run: cargo +nightly fmt --check
+      - run: cargo clippy --all-targets --all-features --locked -- -D warnings
+      - run: RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc --no-deps --all-features --locked
+      - run: cargo package --list --locked
+
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@1.93.0
+      - run: cargo check --all-features --locked
