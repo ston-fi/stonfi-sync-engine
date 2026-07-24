@@ -1,0 +1,41 @@
+[package]
+name = "stonfi_sync_core"
+version = "0.0.1"
+edition.workspace = true
+rust-version.workspace = true
+description = "Dependency-aware asynchronous synchronization engine"
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+publish.workspace = true
+
+include = [
+    "AGENTS.md",
+    "CHANGELOG.md",
+    "Cargo.toml",
+    "LICENSE",
+    "README.md",
+    "examples/**",
+    "src/**",
+]
+
+[lib]
+name = "stonfi_sync_core"
+
+[dependencies]
+anyhow = "1"
+async-trait = "0.1"
+futures = "0.3"
+log = "0.4"
+parking_lot = "0.12"
+smallvec = "2.0.0-alpha.12"
+stonfi_metrics = { version = "0.0.1", git = "https://github.com/ston-fi/stonfi-metrics", rev = "v0.0.1" }
+strum = { version = "0.28", features = ["derive"] }
+thiserror = "2"
+tokio = { version = "1", features = ["rt", "sync", "time"] }
+
+[dev-dependencies]
+assertables = "9.8"
+dashmap = "6.1"
+env_logger = "0.11"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
