@@ -28,6 +28,12 @@ stonfi_sync_core = { git = "https://github.com/ston-fi/stonfi-sync-engine", tag 
 See the [`stonfi_sync_core` README](crates/sync_core/README.md) for its API,
 runtime requirements, metrics initialization, lifecycle, and complete example.
 
+## Releases
+
+Merges to `main` run release-plz only after the workspace quality and MSRV jobs
+succeed. Release-plz creates the version tag and GitHub Release in Git-only
+mode; it does not run `cargo publish` or require a crates.io token.
+
 ## Workspace validation
 
 ```text

@@ -10,20 +10,20 @@ pub type SyncCoreResult<T> = Result<T, SyncCoreError>;
 #[non_exhaustive]
 pub enum SyncCoreError {
     /// An internal or runtime dependency failed.
-    #[error("System: {0:?}")]
+    #[error("System: {0}")]
     System(String),
     /// A caller supplied invalid configuration or input.
     #[error("InvalidArgs: {0}")]
     InvalidArgs(String),
     /// An engine invariant or configuration rule was violated.
-    #[error("LogicError: {0:?}")]
+    #[error("LogicError: {0}")]
     Logic(String),
     /// A network operation failed.
-    #[error("NetError: {0:?}")]
+    #[error("NetError: {0}")]
     NetError(String),
     /// An error from a consumer-provided implementation.
-    #[error("External: {0}")] // rethrow errors from external modules
-    External(Arc<dyn Error + Send + Sync + 'static>),
+    #[error("External: {0}")]
+    External(#[source] Arc<dyn Error + Send + Sync + 'static>),
     /// A consumer-defined error without a more specific classification.
     #[error("Custom: {0}")]
     Custom(String),

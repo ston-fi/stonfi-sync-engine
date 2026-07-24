@@ -1,5 +1,5 @@
 use crate::errors::{SyncCoreError, SyncCoreResult};
-use crate::sync_engine::{SyncHeight, SyncID};
+use crate::sync_engine::SyncHeight;
 use std::time::Duration;
 use stonfi_metrics::MetricsCell;
 use stonfi_metrics::constants::DURATION_BUCKETS_1MS_20S;
@@ -71,19 +71,19 @@ impl SyncEngineMetrics {
         })
     }
 
-    pub(super) fn update_initiator(&self, sync_id: &SyncID, last_height: SyncHeight) {
+    pub(super) fn update_initiator(&self, sync_id: &str, last_height: SyncHeight) {
         self.sync_engine_last_initiator_height
             .with_label_values(&[sync_id])
             .set(last_height as i64);
     }
 
-    pub(super) fn update_synced_height(&self, sync_id: &SyncID, height: SyncHeight) {
+    pub(super) fn update_synced_height(&self, sync_id: &str, height: SyncHeight) {
         self.sync_engine_last_synced_height
             .with_label_values(&[sync_id])
             .set(height as i64);
     }
 
-    pub(super) fn update_sync(&self, sync_id: &SyncID, from: SyncHeight, to: SyncHeight, duration: Duration) {
+    pub(super) fn update_sync(&self, sync_id: &str, from: SyncHeight, to: SyncHeight, duration: Duration) {
         if to < from {
             log::warn!("[METRICS][{sync_id}] invalid sync range for metrics: from={from}, to={to}");
             return;
@@ -102,9 +102,7 @@ impl SyncEngineMetrics {
             .observe(duration_for_height);
     }
 
-    pub(super) fn inc_retries(&self, sync_id: &SyncID, phase: SyncPhase) {
-        self.sync_engine_retries
-            .with_label_values(&[sync_id.as_str(), phase.into()])
-            .inc();
+    pub(super) fn inc_retries(&self, sync_id: &str, phase: SyncPhase) {
+        self.sync_engine_retries.with_label_values(&[sync_id, phase.into()]).inc();
     }
 }

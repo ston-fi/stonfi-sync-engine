@@ -1,11 +1,11 @@
 use crate::errors::SyncCoreResult;
-use crate::sync_engine::{SyncHeight, SyncID, SyncStatusManager};
+use crate::sync_engine::{SyncHeight, SyncStatusManager};
 use parking_lot::RwLock;
 use std::collections::HashMap;
 
 /// In-memory [`SyncStatusManager`] implementation for tests and ephemeral runs.
 pub struct MemStatusManager {
-    storage: RwLock<HashMap<SyncID, SyncHeight>>,
+    storage: RwLock<HashMap<String, SyncHeight>>,
 }
 
 impl MemStatusManager {
@@ -25,12 +25,12 @@ impl Default for MemStatusManager {
 
 #[async_trait::async_trait]
 impl SyncStatusManager for MemStatusManager {
-    async fn save_synced_height(&self, sync_id: &SyncID, sync_height: SyncHeight) -> SyncCoreResult<()> {
-        self.storage.write().insert(sync_id.clone(), sync_height);
+    async fn save_synced_height(&self, sync_id: &str, sync_height: SyncHeight) -> SyncCoreResult<()> {
+        self.storage.write().insert(sync_id.to_owned(), sync_height);
         Ok(())
     }
 
-    async fn load_synced_height(&self, sync_id: &SyncID) -> SyncCoreResult<Option<SyncHeight>> {
+    async fn load_synced_height(&self, sync_id: &str) -> SyncCoreResult<Option<SyncHeight>> {
         Ok(self.storage.read().get(sync_id).copied())
     }
 }
@@ -47,7 +47,7 @@ mod tests {
         status_manager.save_synced_height(&sync_id, 1).await?;
         status_manager.save_synced_height(&sync_id, 2).await?;
 
-        assert_eq!(2, status_manager.load_synced_height(&sync_id).await?.unwrap());
+        assert_eq!(Some(2), status_manager.load_synced_height(&sync_id).await?);
         Ok(())
     }
 

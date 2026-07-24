@@ -42,27 +42,89 @@ their triggers through [`SyncEngine::builder`], and call [`SyncEngine::run`].
 
 See [`examples/simple.rs`](examples/simple.rs) for a complete runnable example.
 
+## Quick start
+
+This helper accepts already constructed consumer implementations, runs the
+dependency graph until the application supplies its shutdown future, and then
+confirms that every engine task has exited:
+
+```rust
+use std::future::Future;
+use std::sync::Arc;
+use stonfi_sync_core::{
+    errors::SyncCoreResult,
+    sync_engine::{Initiator, SyncEngine, SyncStatusManager, Synchronizer},
+};
+
+async fn run_until<F>(
+    status_manager: Arc<dyn SyncStatusManager>,
+    source: Initiator,
+    processor: Synchronizer,
+    shutdown: F,
+) -> SyncCoreResult<()>
+where
+    F: Future<Output = ()>,
+{
+    let engine = SyncEngine::builder(status_manager)?
+        .add_sync(processor, &[&source])?
+        .add_initiator(source)?
+        .build();
+
+    let run_handle = engine.run();
+    shutdown.await;
+    run_handle.shutdown().await
+}
+```
+
 ## Lifecycle and failure behavior
 
-- Dropping [`SyncEngine`] is the cooperative shutdown signal.
-- [`RunHandle::wait`] waits for spawned tasks after the engine is dropped.
-- An in-progress consumer future is not preempted; it must return before the
-  task can observe shutdown.
+- [`SyncEngine::run`] consumes the engine definition, so it cannot be started
+  twice.
+- [`RunHandle::shutdown`] signals cooperative shutdown and waits for every
+  spawned task. Dropping the handle signals best-effort shutdown without
+  waiting.
+- [`RunHandle::wait`] waits for natural task completion without requesting
+  shutdown. Polling initiators normally require `shutdown()` instead.
+- Engine-owned trigger waits and retry sleeps observe shutdown promptly. An
+  in-progress consumer future is not preempted and must return before its task
+  can stop.
+- Both `shutdown()` and `wait()` report task panics and cancellations after
+  awaiting every task.
 - Handler, callback, and status-manager failures are retried with the owning
   implementation's backoff.
-- Callback delivery is at least once. Callbacks must be idempotent because a
-  later callback failure can replay earlier callbacks.
+- Callback failures are retried while the engine is active. Callbacks must be
+  idempotent because a later callback failure can replay earlier callbacks.
+  Delivery is not persisted or guaranteed across shutdown, process failure, or
+  restart.
 - Returning `Ok(None)` from [`SyncHandler::sync_range`] defers that range until
   an upstream trigger advances again.
-- `allow_wrap()` permits a handler to publish a lower height. Downstream users
-  must be prepared to observe such decreases while waiting for all parents.
+- `allow_wrap()` permits a handler to publish a lower height for its own
+  synchronizer. An upstream decrease does not rewind a dependant or cancel
+  forward progress already selected by the dependant's active wait. Subsequent
+  waits observe current trigger values, and each dependant decides independently
+  whether its handler may wrap.
 
 ## Public API
 
-The main types are [`SyncEngine`], [`Builder`], [`Initiator`], [`Synchronizer`],
-[`RunHandle`], and [`MemStatusManager`]. Consumer-owned extension points are
-[`SyncInitiator`], [`SyncHandler`], [`SyncStatusManager`], [`SyncTrigger`], and
-[`SyncCallback`].
+Public items use module-qualified paths. Error types are under [`errors`], the
+in-memory status manager is under [`mem_status_manager`], and engine types and
+extension traits are under [`sync_engine`]. The main types are [`SyncEngine`],
+[`Builder`], [`Initiator`], [`Synchronizer`], [`RunHandle`], and
+[`MemStatusManager`]. Consumer-owned extension points are [`SyncInitiator`],
+[`SyncHandler`], [`SyncStatusManager`], [`SyncTrigger`], and [`SyncCallback`].
+
+Initiators and handlers are owned by one engine task and need only implement
+`Send + 'static`. `SyncHandler::sync_range` receives `&mut self`, so stateful
+implementations can update their own fields without internal locking. Status
+managers and callbacks are shared between tasks and therefore remain
+`Send + Sync + 'static`.
+
+### Migrating pre-release consumers
+
+Root-level re-exports and the `SyncID` alias have been removed. Import public
+items from their modules, keep owned IDs as `String` where needed, and return or
+pass them as `&str` at the engine boundary. Handler implementations must also
+change `sync_range(&self, ...)` to `sync_range(&mut self, ...)`.
 
 Engine metrics use the default Prometheus registry. `SyncEngine::builder`
 initializes and registers them, returning a `SyncCoreError` if registration
@@ -98,18 +160,22 @@ cargo +1.93.0 check -p stonfi_sync_core --all-features --locked
 cargo package --list --locked -p stonfi_sync_core
 ```
 
-[`Builder`]: crate::Builder
-[`Initiator`]: crate::Initiator
-[`MemStatusManager`]: crate::MemStatusManager
-[`RunHandle`]: crate::RunHandle
-[`RunHandle::wait`]: crate::RunHandle::wait
-[`SyncCallback`]: crate::SyncCallback
-[`SyncEngine`]: crate::SyncEngine
-[`SyncEngine::builder`]: crate::SyncEngine::builder
-[`SyncEngine::run`]: crate::SyncEngine::run
-[`SyncHandler`]: crate::SyncHandler
-[`SyncHandler::sync_range`]: crate::SyncHandler::sync_range
-[`SyncInitiator`]: crate::SyncInitiator
-[`SyncStatusManager`]: crate::SyncStatusManager
-[`SyncTrigger`]: crate::SyncTrigger
-[`Synchronizer`]: crate::Synchronizer
+[`Builder`]: crate::sync_engine::Builder
+[`Initiator`]: crate::sync_engine::Initiator
+[`MemStatusManager`]: crate::mem_status_manager::MemStatusManager
+[`RunHandle`]: crate::sync_engine::RunHandle
+[`RunHandle::shutdown`]: crate::sync_engine::RunHandle::shutdown
+[`RunHandle::wait`]: crate::sync_engine::RunHandle::wait
+[`SyncCallback`]: crate::sync_engine::SyncCallback
+[`SyncEngine`]: crate::sync_engine::SyncEngine
+[`SyncEngine::builder`]: crate::sync_engine::SyncEngine::builder
+[`SyncEngine::run`]: crate::sync_engine::SyncEngine::run
+[`SyncHandler`]: crate::sync_engine::SyncHandler
+[`SyncHandler::sync_range`]: crate::sync_engine::SyncHandler::sync_range
+[`SyncInitiator`]: crate::sync_engine::SyncInitiator
+[`SyncStatusManager`]: crate::sync_engine::SyncStatusManager
+[`SyncTrigger`]: crate::sync_engine::SyncTrigger
+[`Synchronizer`]: crate::sync_engine::Synchronizer
+[`errors`]: crate::errors
+[`mem_status_manager`]: crate::mem_status_manager
+[`sync_engine`]: crate::sync_engine

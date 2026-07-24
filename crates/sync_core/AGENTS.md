@@ -24,18 +24,32 @@ dependencies to the core package or hide that surface behind a core feature.
 
 ## Public API and ownership
 
-Keep the established root and module paths. `SyncEngine`, `Builder`,
-`Initiator`, `Synchronizer`, `RunHandle`, and `MemStatusManager` are the primary
-consumer types. The five `Sync*` traits above are intentional downstream
-extension points and must remain externally implementable.
+Keep public paths module-qualified: errors and result types live in `errors`,
+the in-memory implementation lives in `mem_status_manager`, and all engine
+types and extension traits live in `sync_engine`. Do not add root re-exports.
+`SyncEngine`, `Builder`, `Initiator`, `Synchronizer`, `RunHandle`, and
+`MemStatusManager` are the primary consumer types. The five `Sync*` traits above
+are intentional downstream extension points and must remain externally
+implementable.
+
+Public ID boundaries use `&str`; store IDs privately as `String` only where
+ownership is required. Initiators and handlers belong to one task and require
+`Send + 'static`, not `Sync`. `SyncHandler::sync_range` takes `&mut self` so
+stateful handlers do not need internal synchronization. Status managers and
+callbacks are shared across tasks and require `Send + Sync + 'static`.
 
 Prefer `SyncEngine::builder`, add synchronizers with explicit triggers, add the
-corresponding initiators, then build and run. Dropping the engine signals
-cooperative shutdown; await `RunHandle::wait` when task completion matters.
+corresponding initiators, then build and run. `SyncEngine::run` consumes the
+engine definition and returns the runtime owner. Use `RunHandle::shutdown` for
+awaited cooperative shutdown; dropping the handle only signals best-effort
+shutdown. Use `RunHandle::wait` only when every task can finish naturally.
 
 Consumers use the Git dependency documented in `README.md`. The crate requires
 a running Tokio runtime before `SyncEngine::run` is called and returns typed
-`SyncCoreError` values for configuration and consumer failures.
+`SyncCoreError` values for configuration and consumer failures. Keep
+`SyncEngine::builder`, `Builder::add_sync`, and `Builder::add_initiator`
+fallible: validation intentionally happens at the boundary where each invalid
+state can first be detected.
 
 Engine metrics are private global collectors registered through
 `stonfi_metrics`. `SyncEngine::builder` initializes them and preserves its
@@ -52,7 +66,12 @@ not reintroduce per-engine collector APIs or expose Prometheus types publicly.
 - `sync_range(from, to)` processes an inclusive range and may report only a
   height in that range unless `allow_wrap()` is enabled.
 - Returning `Ok(None)` defers progress; it does not commit or publish a height.
-- Callback delivery is at least once, so callbacks must be idempotent.
+- Callback failures are retried only while the engine is active. Callbacks must
+  be idempotent because earlier callbacks may replay; delivery is not durable
+  across shutdown or restart.
+- An upstream trigger decrease does not rewind dependants or cancel progress
+  selected by an active wait. Each handler controls its own wrap behavior
+  through `allow_wrap()`; subsequent waits use current trigger values.
 - Retry loops are cooperative. Consumer futures must return or enforce their
   own timeout if bounded shutdown latency is required.
 - Do not add parallel builders, aliases, convenience re-exports, or alternate
@@ -96,5 +115,7 @@ cargo package --list --locked -p stonfi_sync_core
 ```
 
 GitHub CI owns these validation gates. The package is Git-distributed and has
-`publish = false`; do not enable crates.io publishing or change versions and
-tags unless a release task explicitly requires it.
+`publish = false`. Release-plz runs only after the quality and MSRV jobs pass
+on `main`, and creates the Git tag and GitHub Release without publishing to
+crates.io. Do not add a registry token or manually change versions and tags
+unless a release task explicitly requires it.

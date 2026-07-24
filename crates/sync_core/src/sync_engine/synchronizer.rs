@@ -3,16 +3,16 @@ use crate::sync_engine::colors::*;
 use crate::sync_engine::metrics::{SyncEngineMetrics, SyncPhase};
 use crate::sync_engine::multi_receiver::{MultiReceiver, SyncReceiver, SyncSender};
 use crate::sync_engine::traits::SyncTrigger;
-use crate::sync_engine::{Inner, SyncHeight, SyncStatusManager};
-use crate::{SyncCallback, SyncHandler};
-use std::sync::{Arc, Weak};
+use crate::sync_engine::{SyncCallback, SyncHandler, SyncHeight, SyncStatusManager, sleep_or_cancelled};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
+use tokio_util::sync::CancellationToken;
 
 const SLEEP_IF_DISABLED: Duration = Duration::from_secs(1);
 
 pub(super) struct SyncCtx {
     pub receiver: MultiReceiver,
-    pub parent: Weak<Inner>,
+    pub cancellation: CancellationToken,
     pub status_manager: Arc<dyn SyncStatusManager>,
     pub callbacks: Arc<CallbackStore>,
     pub metrics: &'static SyncEngineMetrics,
@@ -23,20 +23,23 @@ pub(super) struct SyncCtx {
 /// downstream progress.
 pub struct Synchronizer {
     pub(super) handler: Box<dyn SyncHandler>,
-    tx_rx: (SyncSender, SyncReceiver),
+    sender: SyncSender,
+    receiver: SyncReceiver,
 }
 
 impl Synchronizer {
     /// Wraps a handler implementation for registration with a sync engine.
     pub fn new(handler: impl SyncHandler) -> Self {
+        let (sender, receiver) = tokio::sync::watch::channel(0);
         Self {
             handler: Box::new(handler),
-            tx_rx: tokio::sync::watch::channel(0),
+            sender,
+            receiver,
         }
     }
 
     fn publish_height(&self, log_prefix: &str, height: SyncHeight) -> bool {
-        if self.tx_rx.0.send(height).is_ok() {
+        if self.sender.send(height).is_ok() {
             return true;
         }
         log::warn!("[{log_prefix}] failed to publish height {height}: receiver channel is closed");
@@ -57,8 +60,8 @@ impl Synchronizer {
             },
         };
 
-        if ctx.parent.upgrade().is_none() {
-            log::info!("[{log_prefix}] {COLOR_GREEN}finished{COLOR_RESET}: parent is dropped");
+        if ctx.cancellation.is_cancelled() {
+            log::info!("[{log_prefix}] {COLOR_GREEN}finished{COLOR_RESET}: shutdown requested");
             return;
         }
 
@@ -70,22 +73,27 @@ impl Synchronizer {
 
         let mut wait_after_height = synced_height;
         loop {
-            if ctx.parent.upgrade().is_none() {
-                break; // we don't need parent - it's just cancellation marker
+            if ctx.cancellation.is_cancelled() {
+                break;
             }
 
-            let next_height = match ctx.receiver.wait_after(wait_after_height).await {
+            let next_height = tokio::select! {
+                biased;
+                _ = ctx.cancellation.cancelled() => break,
+                height = ctx.receiver.wait_after(wait_after_height) => height,
+            };
+            let next_height = match next_height {
                 Some(height) => height,
                 None => break, // sender was closed
             };
 
             let start_ts = Instant::now();
 
-            // We can't drop ourself to keep channels open
-            // And must check parent from time to time for graceful shutdown
             if !self.handler.is_enabled() {
                 log::debug!("[{log_prefix}] range [{COLOR_RED}{synced_height}{COLOR_RESET}, {COLOR_RED}{next_height}{COLOR_RESET}]: skipped (sync is disabled)");
-                tokio::time::sleep(SLEEP_IF_DISABLED).await;
+                if sleep_or_cancelled(&ctx.cancellation, SLEEP_IF_DISABLED).await {
+                    break;
+                }
                 continue;
             }
 
@@ -97,14 +105,20 @@ impl Synchronizer {
                 continue;
             };
 
-            if !self.on_sync_start_loop(&ctx, &log_prefix, sync_from, sync_to).await {
+            if !self
+                .on_sync_start_loop(&ctx, &log_prefix, sync_from, sync_to)
+                .await
+            {
                 break;
             }
 
             let range_log_prefix_expected =
                 format!("{log_prefix}] sync [{sync_from}, {next_height}] -> [{COLOR_GREEN}{sync_from}{COLOR_RESET}, {COLOR_GREEN}{sync_to}{COLOR_RESET}");
 
-            let Some(new_synced_height) = self.sync_range_loop(&ctx, &range_log_prefix_expected, sync_from, sync_to).await else {
+            let Some(new_synced_height) = self
+                .sync_range_loop(&ctx, &range_log_prefix_expected, sync_from, sync_to)
+                .await
+            else {
                 log::debug!("[{log_prefix}] range [{COLOR_GREEN}{sync_from}{COLOR_RESET}, {COLOR_RED}{sync_to}{COLOR_RESET}]: skipped (ignored)");
                 wait_after_height = next_height;
                 continue;
@@ -145,23 +159,25 @@ impl Synchronizer {
                 }
             }
         }
-        log::info!("[{log_prefix}] {COLOR_GREEN}finished{COLOR_RESET}: parent is dropped")
+        log::info!("[{log_prefix}] {COLOR_GREEN}finished{COLOR_RESET}: shutdown requested")
     }
 
-    async fn on_sync_start_loop(&self, ctx: &SyncCtx, log_prefix: &str, from: SyncHeight, to: SyncHeight) -> bool {
+    async fn on_sync_start_loop(&mut self, ctx: &SyncCtx, log_prefix: &str, from: SyncHeight, to: SyncHeight) -> bool {
         loop {
-            if ctx.parent.upgrade().is_none() {
+            if ctx.cancellation.is_cancelled() {
                 return false;
             }
             match ctx.callbacks.on_sync_start(self.handler.id(), from, to).await {
                 Ok(()) => return true,
                 Err(err) => {
+                    let sync_id = self.handler.id();
                     log::error!(
-                        "[{log_prefix}] {COLOR_RED}callback on_sync_start({}, {from}, {to}) failed with err: {err}, retrying...",
-                        self.handler.id()
+                        "[{log_prefix}] {COLOR_RED}callback on_sync_start({sync_id}, {from}, {to}) failed with err: {err}, retrying..."
                     );
-                    ctx.metrics.inc_retries(self.handler.id(), SyncPhase::Callback);
-                    tokio::time::sleep(self.handler.sleep_on_error()).await;
+                    ctx.metrics.inc_retries(sync_id, SyncPhase::Callback);
+                    if sleep_or_cancelled(&ctx.cancellation, self.handler.sleep_on_error()).await {
+                        return false;
+                    }
                 },
             }
         }
@@ -182,10 +198,18 @@ impl Synchronizer {
     }
 
     #[rustfmt::skip]
-    async fn sync_range_loop(&mut self, ctx: &SyncCtx, log_prefix: &str, from: SyncHeight, to: SyncHeight) -> Option<SyncHeight> {
+    async fn sync_range_loop(
+        &mut self,
+        ctx: &SyncCtx,
+        log_prefix: &str,
+        from: SyncHeight,
+        to: SyncHeight,
+    ) -> Option<SyncHeight> {
         let sync_timeout = self.handler.sync_timeout();
         loop {
-            ctx.parent.upgrade()?;
+            if ctx.cancellation.is_cancelled() {
+                return None;
+            }
             let start_ts = Instant::now();
 
             match tokio::time::timeout(sync_timeout, self.handler.sync_range(from, to)).await {
@@ -216,23 +240,33 @@ impl Synchronizer {
                 },
             }
             ctx.metrics.inc_retries(self.handler.id(), SyncPhase::SyncRange);
-            tokio::time::sleep(self.handler.sleep_on_error()).await;
+            if sleep_or_cancelled(&ctx.cancellation, self.handler.sleep_on_error()).await {
+                return None;
+            }
         }
     }
 
     #[rustfmt::skip]
-    async fn on_sync_error_loop(&self, ctx: &SyncCtx, log_prefix: &str, from: SyncHeight, to: SyncHeight) -> bool {
+    async fn on_sync_error_loop(
+        &mut self,
+        ctx: &SyncCtx,
+        log_prefix: &str,
+        from: SyncHeight,
+        to: SyncHeight,
+    ) -> bool {
         loop {
-            if ctx.parent.upgrade().is_none() {
+            if ctx.cancellation.is_cancelled() {
                 return false;
             }
             if let Err(err) = ctx.callbacks.on_sync_error(self.handler.id(), from, to).await {
+                let sync_id = self.handler.id();
                 log::error!(
-                    "[{log_prefix}] {COLOR_RED}callback on_sync_error({}, {from}, {to}) failed with err: {err}, retrying...",
-                    self.handler.id()
+                    "[{log_prefix}] {COLOR_RED}callback on_sync_error({sync_id}, {from}, {to}) failed with err: {err}, retrying..."
                 );
-                ctx.metrics.inc_retries(self.handler.id(), SyncPhase::Callback);
-                tokio::time::sleep(self.handler.sleep_on_error()).await;
+                ctx.metrics.inc_retries(sync_id, SyncPhase::Callback);
+                if sleep_or_cancelled(&ctx.cancellation, self.handler.sleep_on_error()).await {
+                    return false;
+                }
                 continue;
             }
             return true;
@@ -241,13 +275,17 @@ impl Synchronizer {
 
     async fn load_synced_height_loop(&mut self, ctx: &SyncCtx, log_prefix: &str) -> Option<SyncHeight> {
         loop {
-            ctx.parent.upgrade()?;
+            if ctx.cancellation.is_cancelled() {
+                return None;
+            }
             match ctx.status_manager.load_synced_height(self.handler.id()).await {
                 Ok(height) => break height,
                 Err(err) => {
                     log::warn!("[{log_prefix}] .load_synced_height() returns error: {err}. Retrying...");
                     ctx.metrics.inc_retries(self.handler.id(), SyncPhase::LoadHeight);
-                    tokio::time::sleep(self.handler.sleep_on_error()).await;
+                    if sleep_or_cancelled(&ctx.cancellation, self.handler.sleep_on_error()).await {
+                        return None;
+                    }
                 },
             }
         }
@@ -255,13 +293,15 @@ impl Synchronizer {
 
     async fn save_synced_height_loop(&mut self, ctx: &SyncCtx, log_prefix: &str, height: SyncHeight) -> bool {
         loop {
-            if ctx.parent.upgrade().is_none() {
+            if ctx.cancellation.is_cancelled() {
                 return false;
             }
             if let Err(err) = ctx.status_manager.save_synced_height(self.handler.id(), height).await {
                 log::warn!("[{log_prefix}] .save_synced_height({height}) returns error: {err}. Retrying...");
                 ctx.metrics.inc_retries(self.handler.id(), SyncPhase::SaveHeight);
-                tokio::time::sleep(self.handler.sleep_on_error()).await;
+                if sleep_or_cancelled(&ctx.cancellation, self.handler.sleep_on_error()).await {
+                    return false;
+                }
                 continue;
             }
             return true;
@@ -269,27 +309,26 @@ impl Synchronizer {
     }
 
     async fn on_sync_complete_loop(
-        &self,
+        &mut self,
         ctx: &SyncCtx,
         log_prefix: &str,
         from: SyncHeight,
         to: SyncHeight,
         real_to: SyncHeight,
     ) -> bool {
-        let sync_id = &self.handler.id();
         loop {
-            if ctx.parent.upgrade().is_none() {
+            if ctx.cancellation.is_cancelled() {
                 return false;
             }
-            match ctx.callbacks.on_sync_complete(sync_id, from, to, real_to).await {
+            match ctx.callbacks.on_sync_complete(self.handler.id(), from, to, real_to).await {
                 Ok(()) => return true,
                 Err(err) => {
+                    let sync_id = self.handler.id();
                     log::error!(
                         "[{log_prefix}] {COLOR_RED}callback on_sync_complete({sync_id}, {from}, {to}, {real_to}) failed with err: {err}, retrying..."
                     );
                     ctx.metrics.inc_retries(sync_id, SyncPhase::Callback);
-                    tokio::time::sleep(self.handler.sleep_on_error()).await;
-                    if ctx.parent.upgrade().is_none() {
+                    if sleep_or_cancelled(&ctx.cancellation, self.handler.sleep_on_error()).await {
                         return false;
                     }
                 },
@@ -300,7 +339,7 @@ impl Synchronizer {
 
 impl SyncTrigger for Synchronizer {
     fn receiver(&self) -> SyncReceiver {
-        self.tx_rx.1.clone()
+        self.receiver.clone()
     }
 }
 

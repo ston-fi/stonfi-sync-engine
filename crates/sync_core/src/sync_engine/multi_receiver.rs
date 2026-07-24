@@ -1,15 +1,13 @@
 use crate::errors::{SyncCoreError, SyncCoreResult};
 use crate::sync_engine::SyncHeight;
 use futures::{StreamExt, stream::FuturesUnordered};
-use smallvec::SmallVec;
 use tokio::sync::watch::{Receiver, Sender};
 
 pub(super) type SyncSender = Sender<SyncHeight>;
 /// Receives the latest completed height from an initiator or synchronizer.
 pub type SyncReceiver = Receiver<SyncHeight>;
-const RECEIVERS_ON_STACK: usize = 10;
 
-/// Returns min SyncHeight from all presented sources
+/// Waits for the minimum usable height from all configured sources.
 pub(super) struct MultiReceiver {
     receivers: Vec<SyncReceiver>,
 }
@@ -24,8 +22,7 @@ impl MultiReceiver {
     }
 
     pub(super) async fn wait_after(&mut self, after: SyncHeight) -> Option<SyncHeight> {
-        let mut cur_values: SmallVec<SyncHeight, RECEIVERS_ON_STACK> =
-            self.receivers.iter().map(|rcv| *rcv.borrow()).collect();
+        let mut cur_values: Vec<SyncHeight> = self.receivers.iter().map(|receiver| *receiver.borrow()).collect();
 
         let new_height = loop {
             if self.receivers.iter().any(|rcv| rcv.has_changed().is_err()) {
@@ -99,6 +96,35 @@ mod tests {
         tx3.send(2)?;
 
         assert_eq!(Some(2), task.await?);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn changed_parent_does_not_rewind_an_active_wait() -> anyhow::Result<()> {
+        let (wrapped_tx, wrapped_rx) = watch::channel(20);
+        let (blocking_tx, blocking_rx) = watch::channel(10);
+        let mut multi_receiver = MultiReceiver::new(vec![wrapped_rx, blocking_rx])?;
+
+        {
+            let current_wait = multi_receiver.wait_after(10);
+            futures::pin_mut!(current_wait);
+            assert!(futures::poll!(&mut current_wait).is_pending());
+
+            wrapped_tx.send(0)?;
+            blocking_tx.send(11)?;
+            assert_eq!(Some(11), current_wait.await);
+        }
+
+        {
+            let next_wait = multi_receiver.wait_after(11);
+            futures::pin_mut!(next_wait);
+            assert!(futures::poll!(&mut next_wait).is_pending());
+
+            blocking_tx.send(12)?;
+            assert!(futures::poll!(&mut next_wait).is_pending());
+            wrapped_tx.send(12)?;
+            assert_eq!(Some(12), next_wait.await);
+        }
         Ok(())
     }
 

@@ -1,21 +1,22 @@
-use crate::SyncCallback;
-use crate::sync_engine::Inner;
 use crate::sync_engine::callbacks::CallbackStore;
 use crate::sync_engine::colors::{COLOR_GREEN, COLOR_PINK, COLOR_RED, COLOR_RESET};
 use crate::sync_engine::metrics::{SyncEngineMetrics, SyncPhase};
 use crate::sync_engine::multi_receiver::{SyncReceiver, SyncSender};
 use crate::sync_engine::traits::{SyncInitiator, SyncTrigger};
-use crate::sync_engine::{SyncHeight, SyncID};
-use std::sync::{Arc, Weak};
+use crate::sync_engine::{SyncCallback, SyncHeight, sleep_or_cancelled};
+use std::sync::Arc;
+use tokio_util::sync::CancellationToken;
 
-/// Wraps a [`SyncInitiator`] so it can be registered in a [`crate::SyncEngine`].
+/// Wraps a [`SyncInitiator`] so it can be registered in a
+/// [`SyncEngine`](crate::sync_engine::SyncEngine).
 pub struct Initiator {
     sync_initiator: Box<dyn SyncInitiator>,
-    tx_rx: (SyncSender, SyncReceiver),
+    sender: SyncSender,
+    receiver: SyncReceiver,
 }
 
 pub(super) struct InitiatorCtx {
-    pub parent: Weak<Inner>,
+    pub cancellation: CancellationToken,
     pub metrics: &'static SyncEngineMetrics,
     pub callbacks: Arc<CallbackStore>,
     pub log_progress: fn(SyncHeight, SyncHeight) -> bool,
@@ -24,18 +25,20 @@ pub(super) struct InitiatorCtx {
 impl Initiator {
     /// Wraps an initiator implementation for registration with a sync engine.
     pub fn new(inner: impl SyncInitiator) -> Self {
+        let (sender, receiver) = tokio::sync::watch::channel(0);
         Self {
             sync_initiator: Box::new(inner),
-            tx_rx: tokio::sync::watch::channel(0),
+            sender,
+            receiver,
         }
     }
 
-    pub(super) fn id(&self) -> &SyncID {
+    pub(super) fn id(&self) -> &str {
         self.sync_initiator.id()
     }
 
     fn publish_height(&self, log_prefix: &str, height: SyncHeight) -> bool {
-        if self.tx_rx.0.send(height).is_ok() {
+        if self.sender.send(height).is_ok() {
             return true;
         }
         log::warn!("[{log_prefix}] failed to publish height {height}: receiver channel is closed");
@@ -48,8 +51,8 @@ impl Initiator {
         let log_prefix = format!("{COLOR_PINK}SYNC_INIT{COLOR_RESET}][{COLOR_PINK}{initiator_id}{COLOR_RESET}");
 
         let mut cur_height = loop {
-            if ctx.parent.upgrade().is_none() {
-                log::info!("[{log_prefix}] {COLOR_GREEN}finished{COLOR_RESET}: parent is dropped");
+            if ctx.cancellation.is_cancelled() {
+                log::info!("[{log_prefix}] {COLOR_GREEN}finished{COLOR_RESET}: shutdown requested");
                 return;
             }
             match self.sync_initiator.last_height(0).await {
@@ -57,8 +60,13 @@ impl Initiator {
                 Err(err) => {
                     log::error!("[{log_prefix}] {COLOR_RED}Fail to load initial height: {err}, retrying...");
                     ctx.metrics.inc_retries(&initiator_id, SyncPhase::Initiator);
-                    self.on_initiator_error_loop(&ctx, &log_prefix, &initiator_id, 0).await;
-                    tokio::time::sleep(self.sync_initiator.sleep_on_error()).await;
+                    if !self
+                        .on_initiator_error_loop(&ctx, &log_prefix, 0)
+                        .await
+                        || sleep_or_cancelled(&ctx.cancellation, self.sync_initiator.sleep_on_error()).await
+                    {
+                        return;
+                    }
                 },
             }
         };
@@ -69,8 +77,8 @@ impl Initiator {
             return;
         }
         loop {
-            if ctx.parent.upgrade().is_none() {
-                break; // we don't need parent - it's just cancellation marker
+            if ctx.cancellation.is_cancelled() {
+                break;
             }
 
             let new_height = match self.sync_initiator.last_height(cur_height).await {
@@ -78,8 +86,13 @@ impl Initiator {
                 Err(err) => {
                     log::warn!("[{log_prefix}] {COLOR_RED}last_height() failed with err: {err}");
                     ctx.metrics.inc_retries(&initiator_id, SyncPhase::Initiator);
-                    self.on_initiator_error_loop(&ctx, &log_prefix, &initiator_id, cur_height).await;
-                    tokio::time::sleep(self.sync_initiator.sleep_on_error()).await;
+                    if !self
+                        .on_initiator_error_loop(&ctx, &log_prefix, cur_height)
+                        .await
+                        || sleep_or_cancelled(&ctx.cancellation, self.sync_initiator.sleep_on_error()).await
+                    {
+                        break;
+                    }
                     continue;
                 },
             };
@@ -91,7 +104,9 @@ impl Initiator {
             }
             if new_height <= cur_height {
                 log::debug!("[{log_prefix}] got height <= cur_height ({new_height} <= {cur_height}), waiting for the next poll");
-                tokio::time::sleep(self.sync_initiator.sleep_on_error()).await;
+                if sleep_or_cancelled(&ctx.cancellation, self.sync_initiator.sleep_on_error()).await {
+                    break;
+                }
                 continue;
             }
 
@@ -106,21 +121,26 @@ impl Initiator {
                 log::debug!("[{log_prefix}] sent new height: {COLOR_GREEN}{new_height}{COLOR_RESET}");
             }
 
-            self.on_initiator_sent_loop(&ctx, &log_prefix, &initiator_id, cur_height, new_height).await;
+            if !self
+                .on_initiator_sent_loop(&ctx, &log_prefix, cur_height, new_height)
+                .await
+            {
+                break;
+            }
             cur_height = new_height;
         }
-        log::info!("[{log_prefix}] {COLOR_GREEN}finished{COLOR_RESET}: parent is dropped")
+        log::info!("[{log_prefix}] {COLOR_GREEN}finished{COLOR_RESET}: shutdown requested")
     }
 
     async fn on_initiator_next_height_loop(
-        &self,
+        &mut self,
         ctx: &InitiatorCtx,
         log_prefix: &str,
         previous_height: SyncHeight,
         next_height: SyncHeight,
     ) -> bool {
         loop {
-            if ctx.parent.upgrade().is_none() {
+            if ctx.cancellation.is_cancelled() {
                 return false;
             }
             match ctx
@@ -130,32 +150,34 @@ impl Initiator {
             {
                 Ok(()) => return true,
                 Err(err) => {
+                    let initiator_id = self.sync_initiator.id();
                     log::error!(
-                        "[{log_prefix}] {COLOR_RED}callback on_initiator_next_height({}, {previous_height}, {next_height}) failed with err: {err}, retrying...",
-                        self.sync_initiator.id()
+                        "[{log_prefix}] {COLOR_RED}callback on_initiator_next_height({initiator_id}, {previous_height}, {next_height}) failed with err: {err}, retrying..."
                     );
-                    ctx.metrics.inc_retries(self.sync_initiator.id(), SyncPhase::Callback);
-                    tokio::time::sleep(self.sync_initiator.sleep_on_error()).await;
+                    ctx.metrics.inc_retries(initiator_id, SyncPhase::Callback);
+                    if sleep_or_cancelled(&ctx.cancellation, self.sync_initiator.sleep_on_error()).await {
+                        return false;
+                    }
                 },
             }
         }
     }
 
-    async fn on_initiator_error_loop(&self, ctx: &InitiatorCtx, log_prefix: &str, initiator_id: &SyncID, height: u32) {
+    async fn on_initiator_error_loop(&mut self, ctx: &InitiatorCtx, log_prefix: &str, height: u32) -> bool {
         loop {
-            if ctx.parent.upgrade().is_none() {
-                return;
+            if ctx.cancellation.is_cancelled() {
+                return false;
             }
-            match ctx.callbacks.on_initiator_error(initiator_id, height).await {
-                Ok(()) => return,
+            match ctx.callbacks.on_initiator_error(self.sync_initiator.id(), height).await {
+                Ok(()) => return true,
                 Err(err) => {
+                    let initiator_id = self.sync_initiator.id();
                     ctx.metrics.inc_retries(initiator_id, SyncPhase::Callback);
                     log::error!(
                         "[{log_prefix}] {COLOR_RED}callback on_initiator_error({initiator_id}, {height}) failed with err: {err}, retrying..."
                     );
-                    tokio::time::sleep(self.sync_initiator.sleep_on_error()).await;
-                    if ctx.parent.upgrade().is_none() {
-                        return;
+                    if sleep_or_cancelled(&ctx.cancellation, self.sync_initiator.sleep_on_error()).await {
+                        return false;
                     }
                 },
             }
@@ -163,31 +185,30 @@ impl Initiator {
     }
 
     async fn on_initiator_sent_loop(
-        &self,
+        &mut self,
         ctx: &InitiatorCtx,
         log_prefix: &str,
-        initiator_id: &SyncID,
         previous_height: SyncHeight,
         sent_height: SyncHeight,
-    ) {
+    ) -> bool {
         loop {
-            if ctx.parent.upgrade().is_none() {
-                return;
+            if ctx.cancellation.is_cancelled() {
+                return false;
             }
             match ctx
                 .callbacks
-                .on_initiator_sent(initiator_id, previous_height, sent_height)
+                .on_initiator_sent(self.sync_initiator.id(), previous_height, sent_height)
                 .await
             {
-                Ok(()) => return,
+                Ok(()) => return true,
                 Err(err) => {
+                    let initiator_id = self.sync_initiator.id();
                     log::error!(
                         "[{log_prefix}] {COLOR_RED}callback on_initiator_sent({initiator_id}, {previous_height}, {sent_height}) failed with err: {err}, retrying..."
                     );
                     ctx.metrics.inc_retries(initiator_id, SyncPhase::Callback);
-                    tokio::time::sleep(self.sync_initiator.sleep_on_error()).await;
-                    if ctx.parent.upgrade().is_none() {
-                        return;
+                    if sleep_or_cancelled(&ctx.cancellation, self.sync_initiator.sleep_on_error()).await {
+                        return false;
                     }
                 },
             }
@@ -197,7 +218,7 @@ impl Initiator {
 
 impl SyncTrigger for Initiator {
     fn receiver(&self) -> SyncReceiver {
-        self.tx_rx.1.clone()
+        self.receiver.clone()
     }
 }
 

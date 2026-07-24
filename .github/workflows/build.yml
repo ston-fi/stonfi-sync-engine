@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -36,3 +37,22 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - uses: dtolnay/rust-toolchain@1.93.0
       - run: cargo check --workspace --all-features --locked
+
+  release:
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: [quality, msrv]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: release-plz/action@v0.5
+        with:
+          version: "0.3.160"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

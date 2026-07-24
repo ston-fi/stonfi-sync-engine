@@ -1,4 +1,5 @@
-use crate::{SyncCallback, SyncCoreResult, SyncHeight, SyncID};
+use crate::errors::SyncCoreResult;
+use crate::sync_engine::{SyncCallback, SyncHeight};
 use std::sync::Arc;
 
 #[derive(Clone, Default)]
@@ -14,7 +15,7 @@ impl CallbackStore {
 
 #[async_trait::async_trait]
 impl SyncCallback for CallbackStore {
-    async fn on_initiator_error(&self, id: &SyncID, height: SyncHeight) -> SyncCoreResult<()> {
+    async fn on_initiator_error(&self, id: &str, height: SyncHeight) -> SyncCoreResult<()> {
         for callback in &self.callbacks {
             callback.on_initiator_error(id, height).await?;
         }
@@ -22,7 +23,7 @@ impl SyncCallback for CallbackStore {
     }
     async fn on_initiator_next_height(
         &self,
-        id: &SyncID,
+        id: &str,
         prev_height: SyncHeight,
         next_height: SyncHeight,
     ) -> SyncCoreResult<()> {
@@ -33,7 +34,7 @@ impl SyncCallback for CallbackStore {
     }
     async fn on_initiator_sent(
         &self,
-        id: &SyncID,
+        id: &str,
         prev_height: SyncHeight,
         sent_height: SyncHeight,
     ) -> SyncCoreResult<()> {
@@ -42,13 +43,13 @@ impl SyncCallback for CallbackStore {
         }
         Ok(())
     }
-    async fn on_sync_start(&self, sync_id: &SyncID, from: SyncHeight, to: SyncHeight) -> SyncCoreResult<()> {
+    async fn on_sync_start(&self, sync_id: &str, from: SyncHeight, to: SyncHeight) -> SyncCoreResult<()> {
         for callback in &self.callbacks {
             callback.on_sync_start(sync_id, from, to).await?;
         }
         Ok(())
     }
-    async fn on_sync_error(&self, sync_id: &SyncID, from: SyncHeight, to: SyncHeight) -> SyncCoreResult<()> {
+    async fn on_sync_error(&self, sync_id: &str, from: SyncHeight, to: SyncHeight) -> SyncCoreResult<()> {
         for callback in &self.callbacks {
             callback.on_sync_error(sync_id, from, to).await?;
         }
@@ -56,7 +57,7 @@ impl SyncCallback for CallbackStore {
     }
     async fn on_sync_complete(
         &self,
-        sync_id: &SyncID,
+        sync_id: &str,
         from: SyncHeight,
         to: SyncHeight,
         real_to: SyncHeight,

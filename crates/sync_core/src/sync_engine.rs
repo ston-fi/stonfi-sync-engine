@@ -15,21 +15,27 @@ pub use multi_receiver::*;
 pub use synchronizer::*;
 pub use traits::*;
 
-use crate::errors::SyncCoreResult;
+use crate::errors::{SyncCoreError, SyncCoreResult};
 use crate::sync_engine::callbacks::CallbackStore;
 use crate::sync_engine::metrics::SyncEngineMetrics;
 use crate::sync_engine::multi_receiver::MultiReceiver;
-use parking_lot::Mutex;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
 
-/// Synchronizer and initiator identifier used in logs, metrics, and storage.
-pub type SyncID = String;
 /// Height unit tracked by the engine.
 pub type SyncHeight = u32;
 
 /// Coordinates initiators and synchronizers and runs the dependency graph.
-pub struct SyncEngine(Arc<Inner>);
+pub struct SyncEngine {
+    status_manager: Arc<dyn SyncStatusManager>,
+    callbacks: Arc<CallbackStore>,
+    metrics: &'static SyncEngineMetrics,
+    log_progress: fn(SyncHeight, SyncHeight) -> bool,
+    initiators: Vec<Initiator>,
+    synchronizers: Vec<(Synchronizer, MultiReceiver)>,
+}
 
 impl SyncEngine {
     /// Creates a builder backed by `status_manager`.
@@ -42,73 +48,116 @@ impl SyncEngine {
         Builder::new(status_manager)
     }
 
-    /// Starts every registered initiator and synchronizer on the current Tokio
-    /// runtime and returns handles for observing their completion.
+    /// Consumes the engine definition and starts every registered initiator and
+    /// synchronizer on the current Tokio runtime.
     ///
-    /// Dropping the engine is the cooperative shutdown signal. Consumer
-    /// futures already being polled are not preempted; they must return before
-    /// the task can observe shutdown.
+    /// The returned [`RunHandle`] owns the running tasks. Use
+    /// [`RunHandle::shutdown`] for awaited cooperative shutdown or
+    /// [`RunHandle::wait`] to wait for the tasks to finish naturally.
     ///
     /// # Panics
     ///
     /// Panics when called outside a Tokio runtime, following
     /// [`tokio::spawn`] semantics.
-    pub fn run(&self) -> RunHandle {
-        let inner_weak = Arc::downgrade(&self.0);
+    pub fn run(self) -> RunHandle {
+        let Self {
+            status_manager,
+            callbacks,
+            metrics,
+            log_progress,
+            initiators,
+            synchronizers,
+        } = self;
+        let cancellation = CancellationToken::new();
         let mut tasks = Vec::new();
 
-        for initiator in self.0.initiators.lock().drain(..) {
+        for initiator in initiators {
             let ctx = InitiatorCtx {
-                parent: inner_weak.clone(),
-                metrics: self.0.metrics,
-                callbacks: self.0.callbacks.clone(),
-                log_progress: self.0.log_progress,
+                cancellation: cancellation.clone(),
+                metrics,
+                callbacks: callbacks.clone(),
+                log_progress,
             };
             tasks.push(tokio::spawn(initiator.run(ctx)));
         }
-        for (sync, rcv) in self.0.synchronizers.lock().drain(..) {
+        for (sync, rcv) in synchronizers {
             let ctx = SyncCtx {
                 receiver: rcv,
-                parent: inner_weak.clone(),
-                status_manager: self.0.status_manager.clone(),
-                callbacks: self.0.callbacks.clone(),
-                metrics: self.0.metrics,
-                log_progress: self.0.log_progress,
+                cancellation: cancellation.clone(),
+                status_manager: status_manager.clone(),
+                callbacks: callbacks.clone(),
+                metrics,
+                log_progress,
             };
             tasks.push(tokio::spawn(sync.run(ctx)));
         }
 
-        RunHandle { tasks }
+        RunHandle { cancellation, tasks }
     }
 }
 
 /// Join handles for tasks spawned by [`SyncEngine::run`].
 ///
-/// Drop the engine first, then call [`RunHandle::wait`] to observe cooperative
-/// shutdown. Dropping this handle detaches the tasks; it does not stop them.
+/// Dropping this handle signals cooperative shutdown but does not wait for task
+/// completion. Use [`RunHandle::shutdown`] when completion must be confirmed.
+#[must_use = "dropping the run handle immediately requests engine shutdown"]
 pub struct RunHandle {
+    cancellation: CancellationToken,
     tasks: Vec<JoinHandle<()>>,
 }
 
 impl RunHandle {
-    /// Waits for all spawned tasks to finish.
+    /// Signals cooperative shutdown and waits for all spawned tasks to finish.
     ///
-    /// Task panics and cancellations are logged after all handles have been
-    /// awaited.
-    pub async fn wait(self) {
-        for task in self.tasks {
-            if let Err(err) = task.await {
-                log::warn!("[SYNC_ENGINE] spawned task finished with join error: {err}");
+    /// Engine-owned trigger waits and retry sleeps are interrupted. An active
+    /// consumer-provided future is not preempted and must return before its task
+    /// can observe shutdown.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a spawned task panicked or was cancelled.
+    pub async fn shutdown(mut self) -> SyncCoreResult<()> {
+        self.cancellation.cancel();
+        self.join_tasks().await
+    }
+
+    /// Waits for all spawned tasks to finish without requesting shutdown.
+    ///
+    /// This is useful when every trigger can close naturally. Engines with
+    /// polling initiators normally require [`RunHandle::shutdown`] instead.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a spawned task panicked or was cancelled.
+    pub async fn wait(mut self) -> SyncCoreResult<()> {
+        self.join_tasks().await
+    }
+
+    async fn join_tasks(&mut self) -> SyncCoreResult<()> {
+        let mut first_error = None;
+        for task in self.tasks.drain(..) {
+            if let Err(error) = task.await {
+                if first_error.is_none() {
+                    first_error = Some(SyncCoreError::system(format!("sync engine task failed to join: {error}")));
+                } else {
+                    log::warn!("[SYNC_ENGINE] additional task join failure: {error}");
+                }
             }
         }
+        first_error.map_or(Ok(()), Err)
     }
 }
 
-struct Inner {
-    status_manager: Arc<dyn SyncStatusManager>,
-    initiators: Mutex<Vec<Initiator>>,
-    synchronizers: Mutex<Vec<(Synchronizer, MultiReceiver)>>,
-    callbacks: Arc<CallbackStore>,
-    metrics: &'static SyncEngineMetrics,
-    log_progress: fn(SyncHeight, SyncHeight) -> bool,
+impl Drop for RunHandle {
+    fn drop(&mut self) {
+        self.cancellation.cancel();
+    }
+}
+
+pub(super) async fn sleep_or_cancelled(cancellation: &CancellationToken, duration: Duration) -> bool {
+    tokio::select! {
+        biased;
+        _ = cancellation.cancelled() => true,
+        _ = tokio::time::sleep(duration) => false,
+    }
 }
