@@ -26,7 +26,7 @@ impl Builder {
                 initiators: Default::default(),
                 synchronizers: Default::default(),
                 callbacks: Default::default(),
-                metrics: Arc::new(SyncEngineMetrics::new()?),
+                metrics: SyncEngineMetrics::initialize()?,
                 log_progress: |_, _| true, // always print progress
             },
             callbacks: Default::default(),

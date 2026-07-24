@@ -29,6 +29,7 @@ crates.io:
 ```toml
 [dependencies]
 stonfi_sync_core = { git = "https://github.com/ston-fi/stonfi-sync-engine", tag = "v0.0.1" }
+stonfi_metrics = { version = "0.0.1", git = "https://github.com/ston-fi/stonfi-metrics", rev = "v0.0.1" }
 ```
 
 The crate requires a Tokio runtime. Implement [`SyncInitiator`] for each source,
@@ -60,9 +61,21 @@ The main types are [`SyncEngine`], [`Builder`], [`Initiator`], [`Synchronizer`],
 [`SyncInitiator`], [`SyncHandler`], [`SyncStatusManager`], [`SyncTrigger`], and
 [`SyncCallback`].
 
-`SyncEngine` exposes Prometheus collectors through the metrics integration used
-by this release. Applications must register those collectors before starting
-the engine.
+Engine metrics use the default Prometheus registry. `SyncEngine::builder`
+initializes and registers them, returning a `SyncCoreError` if registration
+fails. Applications that use `stonfi_metrics` should initialize it during
+startup before building the engine:
+
+```rust
+# fn initialize() -> anyhow::Result<()> {
+stonfi_metrics::init_metrics!()?;
+# Ok(())
+# }
+```
+
+Pass a listen address to `init_metrics!` to start its `/metrics` server. Both
+startup paths are idempotent, so applications do not collect or register
+metrics from individual engine values.
 
 ## Toolchain and features
 

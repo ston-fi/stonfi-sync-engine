@@ -1,10 +1,14 @@
 use crate::errors::{SyncCoreError, SyncCoreResult};
 use crate::sync_engine::{SyncHeight, SyncID};
 use std::time::Duration;
-use stonfi_commons_metrics::constants::DURATION_BUCKETS_1MS_20S;
-use stonfi_commons_metrics::metrics_provider::{BoxableCollector, MetricsProvider};
-use stonfi_commons_metrics::prometheus::timer::duration_to_millis;
-use stonfi_commons_metrics::prometheus::{HistogramOpts, HistogramVec, IntCounterVec, IntGaugeVec, Opts};
+use stonfi_metrics::MetricsCell;
+use stonfi_metrics::constants::DURATION_BUCKETS_1MS_20S;
+use stonfi_metrics::prometheus::{self, HistogramVec, IntCounterVec, IntGaugeVec};
+use stonfi_metrics::utils::format_duration_ms;
+
+static METRICS: MetricsCell<SyncEngineMetrics> = MetricsCell::new();
+
+stonfi_metrics::register_metrics!(SyncEngineMetrics, METRICS);
 
 #[derive(strum::IntoStaticStr, Debug)]
 pub(super) enum SyncPhase {
@@ -24,45 +28,47 @@ pub(super) struct SyncEngineMetrics {
 }
 
 impl SyncEngineMetrics {
-    pub(super) fn new() -> SyncCoreResult<Self> {
-        let common_labels = vec!["sync_id"];
-        let phase_labels = vec!["sync_id", "phase"];
+    pub(super) fn initialize() -> SyncCoreResult<&'static Self> {
+        METRICS
+            .init("stonfi_sync_core::SyncEngineMetrics", Self::new)
+            .map_err(SyncCoreError::system)?;
+        METRICS
+            .get()
+            .ok_or_else(|| SyncCoreError::system("sync engine metrics initialization completed without metrics"))
+    }
 
-        let res = Self {
-            sync_engine_last_initiator_height: IntGaugeVec::new(
-                Opts::new(
-                    "sync_engine_last_initiator_height",
-                    "Max height returned by SyncInitiator::last_height()",
-                ),
-                &common_labels,
-            )
-            .map_err(SyncCoreError::system)?,
-            sync_engine_last_synced_height: IntGaugeVec::new(
-                Opts::new("sync_engine_last_synced_height", "Max synced height"),
-                &common_labels,
-            )
-            .map_err(SyncCoreError::system)?,
-            sync_engine_heights_processed: IntCounterVec::new(
-                Opts::new("sync_engine_heights_processed", "How many heights were processed"),
-                &common_labels,
-            )
-            .map_err(SyncCoreError::system)?,
-            sync_engine_height_process_duration_ms: HistogramVec::new(
-                HistogramOpts::new(
-                    "sync_engine_height_process_duration_ms",
-                    "process_duration / processed_heights_count",
-                )
-                .buckets(DURATION_BUCKETS_1MS_20S.clone()),
-                &common_labels,
-            )
-            .map_err(SyncCoreError::system)?,
-            sync_engine_retries: IntCounterVec::new(
-                Opts::new("sync_engine_retries", "How many retries were made during processing"),
-                &phase_labels,
-            )
-            .map_err(SyncCoreError::system)?,
-        };
-        Ok(res)
+    fn new() -> anyhow::Result<Self> {
+        let common_labels = &["sync_id"];
+        let phase_labels = &["sync_id", "phase"];
+
+        Ok(Self {
+            sync_engine_last_initiator_height: prometheus::register_int_gauge_vec!(
+                "sync_engine_last_initiator_height",
+                "Max height returned by SyncInitiator::last_height()",
+                common_labels,
+            )?,
+            sync_engine_last_synced_height: prometheus::register_int_gauge_vec!(
+                "sync_engine_last_synced_height",
+                "Max synced height",
+                common_labels,
+            )?,
+            sync_engine_heights_processed: prometheus::register_int_counter_vec!(
+                "sync_engine_heights_processed",
+                "How many heights were processed",
+                common_labels,
+            )?,
+            sync_engine_height_process_duration_ms: prometheus::register_histogram_vec!(
+                "sync_engine_height_process_duration_ms",
+                "process_duration / processed_heights_count",
+                common_labels,
+                DURATION_BUCKETS_1MS_20S.clone(),
+            )?,
+            sync_engine_retries: prometheus::register_int_counter_vec!(
+                "sync_engine_retries",
+                "How many retries were made during processing",
+                phase_labels,
+            )?,
+        })
     }
 
     pub(super) fn update_initiator(&self, sync_id: &SyncID, last_height: SyncHeight) {
@@ -89,8 +95,8 @@ impl SyncEngineMetrics {
             .with_label_values(&[sync_id])
             .inc_by(heights_processed as u64);
 
-        let duration_millis = duration_to_millis(duration);
-        let duration_for_height = duration_millis as f64 / heights_processed as f64;
+        let duration_millis = format_duration_ms(duration);
+        let duration_for_height = duration_millis / heights_processed as f64;
         self.sync_engine_height_process_duration_ms
             .with_label_values(&[sync_id])
             .observe(duration_for_height);
@@ -100,17 +106,5 @@ impl SyncEngineMetrics {
         self.sync_engine_retries
             .with_label_values(&[sync_id.as_str(), phase.into()])
             .inc();
-    }
-}
-
-impl MetricsProvider for SyncEngineMetrics {
-    fn provide_metrics(&self) -> Vec<&dyn BoxableCollector> {
-        vec![
-            &self.sync_engine_last_initiator_height,
-            &self.sync_engine_last_synced_height,
-            &self.sync_engine_heights_processed,
-            &self.sync_engine_height_process_duration_ms,
-            &self.sync_engine_retries,
-        ]
     }
 }

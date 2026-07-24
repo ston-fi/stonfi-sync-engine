@@ -36,6 +36,12 @@ Consumers use the Git dependency documented in `README.md`. The crate requires
 a running Tokio runtime before `SyncEngine::run` is called and returns typed
 `SyncCoreError` values for configuration and consumer failures.
 
+Engine metrics are private global collectors registered through
+`stonfi_metrics`. `SyncEngine::builder` initializes them and preserves its
+fallible return type. Applications call `stonfi_metrics::init_metrics!` during
+startup to initialize the global registry and optionally serve `/metrics`; do
+not reintroduce per-engine collector APIs or expose Prometheus types publicly.
+
 ## Invariants and pitfalls
 
 - Every initiator and synchronizer ID must be unique within one engine.
@@ -52,6 +58,8 @@ a running Tokio runtime before `SyncEngine::run` is called and returns typed
   lifecycle APIs without a demonstrated downstream need.
 - Production paths must not use `unwrap()`, `expect()`, or panic-driven control
   flow.
+- Keep metric names, labels, buckets, and meanings stable because dashboards
+  and alerts consume them as a behavioral contract.
 
 ## Changing the crate
 

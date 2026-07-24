@@ -446,6 +446,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "inventory"
+version = "0.3.24"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a4f0c30c76f2f4ccee3fe55a2435f691ca00c0e4bd87abe4f4a851b1d4dac39b"
+dependencies = [
+ "rustversion",
+]
+
+[[package]]
 name = "is_terminal_polyfill"
 version = "1.70.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -692,6 +701,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
+name = "rustversion"
+version = "1.0.23"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
+
+[[package]]
 name = "ryu"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -806,15 +821,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "stonfi-commons-metrics"
-version = "0.85.0-dev"
-source = "git+https://git.stonfi.net/ston-fi/rust/commons.git?rev=13f0dded7826b9d4229289fb90a1cd6160dbe167#13f0dded7826b9d4229289fb90a1cd6160dbe167"
+name = "stonfi_metrics"
+version = "0.0.1"
+source = "git+https://github.com/ston-fi/stonfi-metrics?rev=v0.0.1#32f7b2404506f38771f4dea3fe58f747844ba7c2"
 dependencies = [
  "anyhow",
  "axum",
- "log",
+ "inventory",
  "prometheus",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -830,7 +846,7 @@ dependencies = [
  "log",
  "parking_lot",
  "smallvec 2.0.0-alpha.12",
- "stonfi-commons-metrics",
+ "stonfi_metrics",
  "strum",
  "thiserror 2.0.18",
  "tokio",
@@ -975,7 +991,19 @@ checksum = "63e71662fa4b2a2c3a26f570f037eb95bb1f85397f3cd8076caed2f026a6d100"
 dependencies = [
  "log",
  "pin-project-lite",
+ "tracing-attributes",
  "tracing-core",
+]
+
+[[package]]
+name = "tracing-attributes"
+version = "0.1.31"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7490cfa5ec963746568740651ac6781f701c9c5ea257c58e057f3ba8cf69e8da"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

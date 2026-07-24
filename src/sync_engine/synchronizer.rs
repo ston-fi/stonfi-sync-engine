@@ -15,7 +15,7 @@ pub(super) struct SyncCtx {
     pub parent: Weak<Inner>,
     pub status_manager: Arc<dyn SyncStatusManager>,
     pub callbacks: Arc<CallbackStore>,
-    pub metrics: Arc<SyncEngineMetrics>,
+    pub metrics: &'static SyncEngineMetrics,
     pub log_progress: fn(SyncHeight, SyncHeight) -> bool,
 }
 

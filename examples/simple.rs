@@ -97,6 +97,7 @@ impl SyncCallback for ExampleCallback {
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
+    stonfi_metrics::init_metrics!()?;
 
     // `MemStatusManager` keeps synced heights in memory. It is useful for tests,
     // examples, and ephemeral tools. It returns `None` until something is saved.

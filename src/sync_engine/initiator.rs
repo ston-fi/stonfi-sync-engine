@@ -16,7 +16,7 @@ pub struct Initiator {
 
 pub(super) struct InitiatorCtx {
     pub parent: Weak<Inner>,
-    pub metrics: Arc<SyncEngineMetrics>,
+    pub metrics: &'static SyncEngineMetrics,
     pub callbacks: Arc<CallbackStore>,
     pub log_progress: fn(SyncHeight, SyncHeight) -> bool,
 }

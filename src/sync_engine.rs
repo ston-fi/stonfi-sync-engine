@@ -21,7 +21,6 @@ use crate::sync_engine::metrics::SyncEngineMetrics;
 use crate::sync_engine::multi_receiver::MultiReceiver;
 use parking_lot::Mutex;
 use std::sync::Arc;
-use stonfi_commons_metrics::metrics_provider::{BoxableCollector, MetricsProvider};
 use tokio::task::JoinHandle;
 
 /// Synchronizer and initiator identifier used in logs, metrics, and storage.
@@ -37,7 +36,8 @@ impl SyncEngine {
     ///
     /// # Errors
     ///
-    /// Returns an error if the engine's metrics cannot be constructed.
+    /// Returns an error if the engine's metrics cannot be initialized and
+    /// registered with the default Prometheus registry.
     pub fn builder(status_manager: Arc<dyn SyncStatusManager>) -> SyncCoreResult<Builder> {
         Builder::new(status_manager)
     }
@@ -60,7 +60,7 @@ impl SyncEngine {
         for initiator in self.0.initiators.lock().drain(..) {
             let ctx = InitiatorCtx {
                 parent: inner_weak.clone(),
-                metrics: self.0.metrics.clone(),
+                metrics: self.0.metrics,
                 callbacks: self.0.callbacks.clone(),
                 log_progress: self.0.log_progress,
             };
@@ -72,7 +72,7 @@ impl SyncEngine {
                 parent: inner_weak.clone(),
                 status_manager: self.0.status_manager.clone(),
                 callbacks: self.0.callbacks.clone(),
-                metrics: self.0.metrics.clone(),
+                metrics: self.0.metrics,
                 log_progress: self.0.log_progress,
             };
             tasks.push(tokio::spawn(sync.run(ctx)));
@@ -104,17 +104,11 @@ impl RunHandle {
     }
 }
 
-impl MetricsProvider for SyncEngine {
-    fn provide_metrics(&self) -> Vec<&dyn BoxableCollector> {
-        self.0.metrics.provide_metrics()
-    }
-}
-
 struct Inner {
     status_manager: Arc<dyn SyncStatusManager>,
     initiators: Mutex<Vec<Initiator>>,
     synchronizers: Mutex<Vec<(Synchronizer, MultiReceiver)>>,
     callbacks: Arc<CallbackStore>,
-    metrics: Arc<SyncEngineMetrics>,
+    metrics: &'static SyncEngineMetrics,
     log_progress: fn(SyncHeight, SyncHeight) -> bool,
 }
