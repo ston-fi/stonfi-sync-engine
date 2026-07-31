@@ -15,7 +15,6 @@ pub(super) struct SyncCtx {
     pub cancellation: CancellationToken,
     pub status_manager: Arc<dyn SyncStatusManager>,
     pub callbacks: Arc<CallbackStore>,
-    pub metrics: &'static SyncEngineMetrics,
     pub log_progress: fn(SyncHeight, SyncHeight) -> bool,
 }
 
@@ -147,10 +146,10 @@ impl Synchronizer {
             wait_after_height = synced_height;
             let sync_duration = start_ts.elapsed();
             if new_synced_height < sync_from {
-                ctx.metrics.update_synced_height(&sync_id, new_synced_height);
+                SyncEngineMetrics::update_synced_height(&sync_id, new_synced_height);
                 log::info!("[{range_log_prefix_actual}]: wrapped to {COLOR_GREEN}{new_synced_height}{COLOR_RESET} ({sync_duration:.3?})");
             } else {
-                ctx.metrics.update_sync(&sync_id, sync_from, synced_height, sync_duration);
+                SyncEngineMetrics::update_sync(&sync_id, sync_from, synced_height, sync_duration);
                 let synced_range = new_synced_height - sync_from + 1;
                 if (ctx.log_progress)(sync_from, sync_to) {
                     log::info!("[{range_log_prefix_actual}]: done ({COLOR_GREEN}{synced_range}{COLOR_RESET} blocks, {sync_duration:.3?})");
@@ -174,7 +173,7 @@ impl Synchronizer {
                     log::error!(
                         "[{log_prefix}] {COLOR_RED}callback on_sync_start({sync_id}, {from}, {to}) failed with err: {err}, retrying..."
                     );
-                    ctx.metrics.inc_retries(sync_id, SyncPhase::Callback);
+                    SyncEngineMetrics::inc_retries(sync_id, SyncPhase::Callback);
                     if sleep_or_cancelled(&ctx.cancellation, self.handler.sleep_on_error()).await {
                         return false;
                     }
@@ -239,7 +238,7 @@ impl Synchronizer {
                     if !self.on_sync_error_loop(ctx, log_prefix, from, to).await { return None; }
                 },
             }
-            ctx.metrics.inc_retries(self.handler.id(), SyncPhase::SyncRange);
+            SyncEngineMetrics::inc_retries(self.handler.id(), SyncPhase::SyncRange);
             if sleep_or_cancelled(&ctx.cancellation, self.handler.sleep_on_error()).await {
                 return None;
             }
@@ -263,7 +262,7 @@ impl Synchronizer {
                 log::error!(
                     "[{log_prefix}] {COLOR_RED}callback on_sync_error({sync_id}, {from}, {to}) failed with err: {err}, retrying..."
                 );
-                ctx.metrics.inc_retries(sync_id, SyncPhase::Callback);
+                SyncEngineMetrics::inc_retries(sync_id, SyncPhase::Callback);
                 if sleep_or_cancelled(&ctx.cancellation, self.handler.sleep_on_error()).await {
                     return false;
                 }
@@ -282,7 +281,7 @@ impl Synchronizer {
                 Ok(height) => break height,
                 Err(err) => {
                     log::warn!("[{log_prefix}] .load_synced_height() returns error: {err}. Retrying...");
-                    ctx.metrics.inc_retries(self.handler.id(), SyncPhase::LoadHeight);
+                    SyncEngineMetrics::inc_retries(self.handler.id(), SyncPhase::LoadHeight);
                     if sleep_or_cancelled(&ctx.cancellation, self.handler.sleep_on_error()).await {
                         return None;
                     }
@@ -298,7 +297,7 @@ impl Synchronizer {
             }
             if let Err(err) = ctx.status_manager.save_synced_height(self.handler.id(), height).await {
                 log::warn!("[{log_prefix}] .save_synced_height({height}) returns error: {err}. Retrying...");
-                ctx.metrics.inc_retries(self.handler.id(), SyncPhase::SaveHeight);
+                SyncEngineMetrics::inc_retries(self.handler.id(), SyncPhase::SaveHeight);
                 if sleep_or_cancelled(&ctx.cancellation, self.handler.sleep_on_error()).await {
                     return false;
                 }
@@ -327,7 +326,7 @@ impl Synchronizer {
                     log::error!(
                         "[{log_prefix}] {COLOR_RED}callback on_sync_complete({sync_id}, {from}, {to}, {real_to}) failed with err: {err}, retrying..."
                     );
-                    ctx.metrics.inc_retries(sync_id, SyncPhase::Callback);
+                    SyncEngineMetrics::inc_retries(sync_id, SyncPhase::Callback);
                     if sleep_or_cancelled(&ctx.cancellation, self.handler.sleep_on_error()).await {
                         return false;
                     }

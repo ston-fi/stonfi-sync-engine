@@ -9,12 +9,12 @@ own package under `crates/`.
 | Package | Path | Status | Responsibility |
 | --- | --- | --- | --- |
 | [`stonfi_sync_core`](crates/sync_core/README.md) | `crates/sync_core` | Available at `v0.0.1` | Dependency-aware synchronization of ordered heights |
-| `distributed_sync` | `crates/distributed_sync` | Planned | Distributed task transport, servers, and workers |
+| [`stonfi_distributed_sync`](crates/distributed_sync/README.md) | `crates/distributed_sync` | Unreleased | Distributed task coordination, gRPC servers, and workers |
 
-`distributed_sync` will be a separate workspace package depending on
-`stonfi_sync_core`. It will not be exposed as a core feature because its gRPC,
-protobuf, server, worker, serialization, and Tongrid integration concerns have
-an independent dependency and lifecycle boundary.
+`stonfi_distributed_sync` is a separate package depending on
+`stonfi_sync_core`. It is not exposed as a core feature because its gRPC,
+protobuf, server, worker, serialization, and lifecycle concerns have an
+independent dependency and release boundary.
 
 ## Using the core package
 
@@ -27,6 +27,9 @@ stonfi_sync_core = { git = "https://github.com/ston-fi/stonfi-sync-engine", tag 
 
 See the [`stonfi_sync_core` README](crates/sync_core/README.md) for its API,
 runtime requirements, metrics initialization, lifecycle, and complete example.
+The [`stonfi_distributed_sync` README](crates/distributed_sync/README.md)
+documents its currently unreleased API, at-least-once delivery contract,
+trusted-network boundary, metrics, and runnable example.
 
 ## Releases
 
@@ -45,4 +48,5 @@ cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc --workspace --no-deps --all-features --locked
 cargo +1.93.0 check --workspace --all-features --locked
 cargo package --list --locked -p stonfi_sync_core
+cargo package --list --locked -p stonfi_distributed_sync
 ```

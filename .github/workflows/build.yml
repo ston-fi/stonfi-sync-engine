@@ -29,6 +29,7 @@ jobs:
       - run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
       - run: RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc --workspace --no-deps --all-features --locked
       - run: cargo package --list --locked -p stonfi_sync_core
+      - run: cargo package --list --locked -p stonfi_distributed_sync
 
   msrv:
     runs-on: ubuntu-latest

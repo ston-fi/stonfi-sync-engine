@@ -1,4 +1,3 @@
-use crate::errors::{SyncCoreError, SyncCoreResult};
 use crate::sync_engine::SyncHeight;
 use std::time::Duration;
 use stonfi_metrics::MetricsCell;
@@ -28,15 +27,6 @@ pub(super) struct SyncEngineMetrics {
 }
 
 impl SyncEngineMetrics {
-    pub(super) fn initialize() -> SyncCoreResult<&'static Self> {
-        METRICS
-            .init("stonfi_sync_core::SyncEngineMetrics", Self::new)
-            .map_err(SyncCoreError::system)?;
-        METRICS
-            .get()
-            .ok_or_else(|| SyncCoreError::system("sync engine metrics initialization completed without metrics"))
-    }
-
     fn new() -> anyhow::Result<Self> {
         let common_labels = &["sync_id"];
         let phase_labels = &["sync_id", "phase"];
@@ -71,38 +61,42 @@ impl SyncEngineMetrics {
         })
     }
 
-    pub(super) fn update_initiator(&self, sync_id: &str, last_height: SyncHeight) {
-        self.sync_engine_last_initiator_height
+    pub(super) fn update_initiator(sync_id: &str, last_height: SyncHeight) {
+        METRICS
+            .sync_engine_last_initiator_height
             .with_label_values(&[sync_id])
             .set(last_height as i64);
     }
 
-    pub(super) fn update_synced_height(&self, sync_id: &str, height: SyncHeight) {
-        self.sync_engine_last_synced_height
+    pub(super) fn update_synced_height(sync_id: &str, height: SyncHeight) {
+        METRICS
+            .sync_engine_last_synced_height
             .with_label_values(&[sync_id])
             .set(height as i64);
     }
 
-    pub(super) fn update_sync(&self, sync_id: &str, from: SyncHeight, to: SyncHeight, duration: Duration) {
+    pub(super) fn update_sync(sync_id: &str, from: SyncHeight, to: SyncHeight, duration: Duration) {
         if to < from {
             log::warn!("[METRICS][{sync_id}] invalid sync range for metrics: from={from}, to={to}");
             return;
         }
         let heights_processed = to - from + 1;
-        self.update_synced_height(sync_id, to);
+        Self::update_synced_height(sync_id, to);
 
-        self.sync_engine_heights_processed
+        METRICS
+            .sync_engine_heights_processed
             .with_label_values(&[sync_id])
             .inc_by(heights_processed as u64);
 
         let duration_millis = format_duration_ms(duration);
         let duration_for_height = duration_millis / heights_processed as f64;
-        self.sync_engine_height_process_duration_ms
+        METRICS
+            .sync_engine_height_process_duration_ms
             .with_label_values(&[sync_id])
             .observe(duration_for_height);
     }
 
-    pub(super) fn inc_retries(&self, sync_id: &str, phase: SyncPhase) {
-        self.sync_engine_retries.with_label_values(&[sync_id, phase.into()]).inc();
+    pub(super) fn inc_retries(sync_id: &str, phase: SyncPhase) {
+        METRICS.sync_engine_retries.with_label_values(&[sync_id, phase.into()]).inc();
     }
 }

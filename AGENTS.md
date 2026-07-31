@@ -10,13 +10,13 @@ All packages live under `crates/`:
 
 - `crates/sync_core` contains the transport-independent synchronization engine
   and is published as the `stonfi_sync_core` package.
-- `crates/distributed_sync` is reserved for a future separate package owning
-  distributed task transport, gRPC/protobuf, server and worker lifecycles,
-  serialization, and Tongrid integrations.
+- `crates/distributed_sync` contains the public `stonfi_distributed_sync`
+  package owning in-memory distributed task coordination, gRPC/protobuf,
+  server and worker lifecycles, and task serialization.
 
 Do not implement distributed synchronization as a `stonfi_sync_core` feature.
 The packages have different dependencies, runtime responsibilities, public API
-boundaries, and release concerns. A new package must have its own manifest,
+boundaries, and release concerns. Each package must have its own manifest,
 README, agent guide, changelog, examples or integration tests where useful, and
 public-library review.
 
@@ -54,6 +54,7 @@ cargo +nightly fmt --check
 RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc --workspace --no-deps --all-features --locked
 cargo +1.93.0 check --workspace --all-features --locked
 cargo package --list --locked -p stonfi_sync_core
+cargo package --list --locked -p stonfi_distributed_sync
 ```
 
 GitHub CI owns these gates. Packages are currently Git-distributed with

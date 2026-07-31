@@ -117,7 +117,7 @@ async fn main() -> anyhow::Result<()> {
     //
     // `add_sync(..., &[&initiator])` means the synchronizer should only advance
     // when this initiator publishes a higher completed height.
-    let engine = SyncEngine::builder(status_manager.clone())?
+    let engine = SyncEngine::builder(status_manager.clone())
         .add_sync(synchronizer, &[&initiator])?
         .add_initiator(initiator)?
         .add_callback(Arc::new(ExampleCallback))

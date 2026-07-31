@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented in this file.
 
+## Unreleased
+
+- Delegate metric-cell initialization exclusively to
+  `stonfi_metrics::init_metrics!` and access registered collectors directly
+  from metric helpers.
+- Make `SyncEngine::builder` infallible and keep validation on the registration
+  methods that can actually reject input.
+- Observe engine task completion concurrently, reporting a later task failure
+  even when an earlier task does not terminate.
+- Document at-least-once handler range delivery and the idempotency and
+  cancellation requirements it places on handler effects.
+
 ## 0.0.1
 
 - Import the dependency-aware synchronization engine into its public repository.

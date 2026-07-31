@@ -17,7 +17,6 @@ pub struct Initiator {
 
 pub(super) struct InitiatorCtx {
     pub cancellation: CancellationToken,
-    pub metrics: &'static SyncEngineMetrics,
     pub callbacks: Arc<CallbackStore>,
     pub log_progress: fn(SyncHeight, SyncHeight) -> bool,
 }
@@ -59,7 +58,7 @@ impl Initiator {
                 Ok(height) => break height,
                 Err(err) => {
                     log::error!("[{log_prefix}] {COLOR_RED}Fail to load initial height: {err}, retrying...");
-                    ctx.metrics.inc_retries(&initiator_id, SyncPhase::Initiator);
+                    SyncEngineMetrics::inc_retries(&initiator_id, SyncPhase::Initiator);
                     if !self
                         .on_initiator_error_loop(&ctx, &log_prefix, 0)
                         .await
@@ -70,7 +69,7 @@ impl Initiator {
                 },
             }
         };
-        ctx.metrics.update_initiator(&initiator_id, cur_height);
+        SyncEngineMetrics::update_initiator(&initiator_id, cur_height);
 
         log::info!("[{log_prefix}] started with last_height: {COLOR_GREEN}{cur_height}{COLOR_RESET}");
         if cur_height > 0 && !self.publish_height(&log_prefix, cur_height) {
@@ -85,7 +84,7 @@ impl Initiator {
                 Ok(height) => height,
                 Err(err) => {
                     log::warn!("[{log_prefix}] {COLOR_RED}last_height() failed with err: {err}");
-                    ctx.metrics.inc_retries(&initiator_id, SyncPhase::Initiator);
+                    SyncEngineMetrics::inc_retries(&initiator_id, SyncPhase::Initiator);
                     if !self
                         .on_initiator_error_loop(&ctx, &log_prefix, cur_height)
                         .await
@@ -113,7 +112,7 @@ impl Initiator {
             if !self.publish_height(&log_prefix, new_height) {
                 break;
             }
-            ctx.metrics.update_initiator(&initiator_id, new_height);
+            SyncEngineMetrics::update_initiator(&initiator_id, new_height);
 
             if (ctx.log_progress)(new_height, new_height) {
                 log::info!("[{log_prefix}] sent new height: {COLOR_GREEN}{new_height}{COLOR_RESET}");
@@ -154,7 +153,7 @@ impl Initiator {
                     log::error!(
                         "[{log_prefix}] {COLOR_RED}callback on_initiator_next_height({initiator_id}, {previous_height}, {next_height}) failed with err: {err}, retrying..."
                     );
-                    ctx.metrics.inc_retries(initiator_id, SyncPhase::Callback);
+                    SyncEngineMetrics::inc_retries(initiator_id, SyncPhase::Callback);
                     if sleep_or_cancelled(&ctx.cancellation, self.sync_initiator.sleep_on_error()).await {
                         return false;
                     }
@@ -172,7 +171,7 @@ impl Initiator {
                 Ok(()) => return true,
                 Err(err) => {
                     let initiator_id = self.sync_initiator.id();
-                    ctx.metrics.inc_retries(initiator_id, SyncPhase::Callback);
+                    SyncEngineMetrics::inc_retries(initiator_id, SyncPhase::Callback);
                     log::error!(
                         "[{log_prefix}] {COLOR_RED}callback on_initiator_error({initiator_id}, {height}) failed with err: {err}, retrying..."
                     );
@@ -206,7 +205,7 @@ impl Initiator {
                     log::error!(
                         "[{log_prefix}] {COLOR_RED}callback on_initiator_sent({initiator_id}, {previous_height}, {sent_height}) failed with err: {err}, retrying..."
                     );
-                    ctx.metrics.inc_retries(initiator_id, SyncPhase::Callback);
+                    SyncEngineMetrics::inc_retries(initiator_id, SyncPhase::Callback);
                     if sleep_or_cancelled(&ctx.cancellation, self.sync_initiator.sleep_on_error()).await {
                         return false;
                     }

@@ -17,8 +17,8 @@ pub use traits::*;
 
 use crate::errors::{SyncCoreError, SyncCoreResult};
 use crate::sync_engine::callbacks::CallbackStore;
-use crate::sync_engine::metrics::SyncEngineMetrics;
 use crate::sync_engine::multi_receiver::MultiReceiver;
+use futures::stream::{FuturesUnordered, StreamExt};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::task::JoinHandle;
@@ -31,7 +31,6 @@ pub type SyncHeight = u32;
 pub struct SyncEngine {
     status_manager: Arc<dyn SyncStatusManager>,
     callbacks: Arc<CallbackStore>,
-    metrics: &'static SyncEngineMetrics,
     log_progress: fn(SyncHeight, SyncHeight) -> bool,
     initiators: Vec<Initiator>,
     synchronizers: Vec<(Synchronizer, MultiReceiver)>,
@@ -39,12 +38,8 @@ pub struct SyncEngine {
 
 impl SyncEngine {
     /// Creates a builder backed by `status_manager`.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the engine's metrics cannot be initialized and
-    /// registered with the default Prometheus registry.
-    pub fn builder(status_manager: Arc<dyn SyncStatusManager>) -> SyncCoreResult<Builder> {
+    #[must_use]
+    pub fn builder(status_manager: Arc<dyn SyncStatusManager>) -> Builder {
         Builder::new(status_manager)
     }
 
@@ -58,12 +53,12 @@ impl SyncEngine {
     /// # Panics
     ///
     /// Panics when called outside a Tokio runtime, following
-    /// [`tokio::spawn`] semantics.
+    /// [`tokio::spawn`] semantics. Spawned tasks also panic when application
+    /// startup has not called `stonfi_metrics::init_metrics!`.
     pub fn run(self) -> RunHandle {
         let Self {
             status_manager,
             callbacks,
-            metrics,
             log_progress,
             initiators,
             synchronizers,
@@ -74,7 +69,6 @@ impl SyncEngine {
         for initiator in initiators {
             let ctx = InitiatorCtx {
                 cancellation: cancellation.clone(),
-                metrics,
                 callbacks: callbacks.clone(),
                 log_progress,
             };
@@ -86,7 +80,6 @@ impl SyncEngine {
                 cancellation: cancellation.clone(),
                 status_manager: status_manager.clone(),
                 callbacks: callbacks.clone(),
-                metrics,
                 log_progress,
             };
             tasks.push(tokio::spawn(sync.run(ctx)));
@@ -135,10 +128,15 @@ impl RunHandle {
 
     async fn join_tasks(&mut self) -> SyncCoreResult<()> {
         let mut first_error = None;
-        for task in self.tasks.drain(..) {
-            if let Err(error) = task.await {
+        let mut pending = self.tasks.drain(..).collect::<FuturesUnordered<_>>();
+        while let Some(result) = pending.next().await {
+            if let Err(error) = result {
                 if first_error.is_none() {
                     first_error = Some(SyncCoreError::system(format!("sync engine task failed to join: {error}")));
+                    self.cancellation.cancel();
+                    for task in pending.iter() {
+                        task.abort();
+                    }
                 } else {
                     log::warn!("[SYNC_ENGINE] additional task join failure: {error}");
                 }

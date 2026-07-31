@@ -48,6 +48,11 @@ pub trait SyncHandler: Send + 'static {
     /// by the handler. `height` must be within `[from, to]`, except when
     /// `allow_wrap()` is enabled, in which case returning `Some(height < from)`
     /// is reserved for wrap behavior.
+    ///
+    /// Calls are at-least-once. The engine cancels this future when
+    /// [`Self::sync_timeout`] elapses and retries the same range after errors or
+    /// timeouts. Implementations must make externally visible effects
+    /// idempotent, cancellation-safe, or transactional.
     async fn sync_range(&mut self, from: SyncHeight, to: SyncHeight) -> SyncCoreResult<Option<SyncHeight>>;
 
     /// Returns whether the handler is currently allowed to process new ranges.

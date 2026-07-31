@@ -1,7 +1,6 @@
 use crate::errors::{SyncCoreError, SyncCoreResult};
 use crate::sync_engine::callbacks::CallbackStore;
 use crate::sync_engine::initiator::Initiator;
-use crate::sync_engine::metrics::SyncEngineMetrics;
 use crate::sync_engine::multi_receiver::MultiReceiver;
 use crate::sync_engine::synchronizer::Synchronizer;
 use crate::sync_engine::traits::SyncTrigger;
@@ -12,7 +11,6 @@ use std::sync::Arc;
 /// Builds a [`SyncEngine`] with initiators, synchronizers, and callbacks.
 pub struct Builder {
     status_manager: Arc<dyn SyncStatusManager>,
-    metrics: &'static SyncEngineMetrics,
     log_progress: fn(SyncHeight, SyncHeight) -> bool,
     initiators: Vec<Initiator>,
     synchronizers: Vec<(Synchronizer, MultiReceiver)>,
@@ -21,17 +19,15 @@ pub struct Builder {
 }
 
 impl Builder {
-    pub(super) fn new(status_manager: Arc<dyn SyncStatusManager>) -> SyncCoreResult<Self> {
-        let builder = Self {
+    pub(super) fn new(status_manager: Arc<dyn SyncStatusManager>) -> Self {
+        Self {
             status_manager,
-            metrics: SyncEngineMetrics::initialize()?,
             log_progress: |_, _| true,
             initiators: Default::default(),
             synchronizers: Default::default(),
             callbacks: Default::default(),
             registered_ids: Default::default(),
-        };
-        Ok(builder)
+        }
     }
 
     /// Registers an initiator.
@@ -104,7 +100,6 @@ impl Builder {
         SyncEngine {
             status_manager: self.status_manager,
             callbacks: Arc::new(self.callbacks),
-            metrics: self.metrics,
             log_progress: self.log_progress,
             initiators: self.initiators,
             synchronizers: self.synchronizers,

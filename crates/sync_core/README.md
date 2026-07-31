@@ -44,9 +44,10 @@ See [`examples/simple.rs`](examples/simple.rs) for a complete runnable example.
 
 ## Quick start
 
-This helper accepts already constructed consumer implementations, runs the
-dependency graph until the application supplies its shutdown future, and then
-confirms that every engine task has exited:
+After application startup has initialized metrics, this helper accepts already
+constructed consumer implementations, runs the dependency graph until the
+application supplies its shutdown future, and then confirms that every engine
+task has exited:
 
 ```rust
 use std::future::Future;
@@ -65,7 +66,7 @@ async fn run_until<F>(
 where
     F: Future<Output = ()>,
 {
-    let engine = SyncEngine::builder(status_manager)?
+    let engine = SyncEngine::builder(status_manager)
         .add_sync(processor, &[&source])?
         .add_initiator(source)?
         .build();
@@ -88,10 +89,14 @@ where
 - Engine-owned trigger waits and retry sleeps observe shutdown promptly. An
   in-progress consumer future is not preempted and must return before its task
   can stop.
-- Both `shutdown()` and `wait()` report task panics and cancellations after
-  awaiting every task.
+- Both `shutdown()` and `wait()` report task panics and cancellations. A task
+  failure cancels and aborts the remaining engine tasks so failure reporting
+  cannot be hidden behind a consumer future that never returns.
 - Handler, callback, and status-manager failures are retried with the owning
   implementation's backoff.
+- Handler range delivery is at-least-once. A timed-out or failed
+  `sync_range()` call is retried for the same range, so handler effects must be
+  idempotent, cancellation-safe, or transactional.
 - Callback failures are retried while the engine is active. Callbacks must be
   idempotent because a later callback failure can replay earlier callbacks.
   Delivery is not persisted or guaranteed across shutdown, process failure, or
@@ -119,17 +124,16 @@ implementations can update their own fields without internal locking. Status
 managers and callbacks are shared between tasks and therefore remain
 `Send + Sync + 'static`.
 
-### Migrating pre-release consumers
+### Migrating from `v0.0.1`
 
 Root-level re-exports and the `SyncID` alias have been removed. Import public
 items from their modules, keep owned IDs as `String` where needed, and return or
 pass them as `&str` at the engine boundary. Handler implementations must also
 change `sync_range(&self, ...)` to `sync_range(&mut self, ...)`.
 
-Engine metrics use the default Prometheus registry. `SyncEngine::builder`
-initializes and registers them, returning a `SyncCoreError` if registration
-fails. Applications that use `stonfi_metrics` should initialize it during
-startup before building the engine:
+Engine metrics use the default Prometheus registry and are registered with
+`stonfi_metrics` automatically. Applications must initialize the registered
+collectors during startup before running the engine:
 
 ```rust
 # fn initialize() -> anyhow::Result<()> {
@@ -138,9 +142,10 @@ stonfi_metrics::init_metrics!()?;
 # }
 ```
 
-Pass a listen address to `init_metrics!` to start its `/metrics` server. Both
-startup paths are idempotent, so applications do not collect or register
-metrics from individual engine values.
+Pass a listen address to `init_metrics!` to start its `/metrics` server.
+Initialization is idempotent. Engine values never initialize or register
+collectors themselves; metric access before startup initialization panics by
+design.
 
 ## Toolchain and features
 

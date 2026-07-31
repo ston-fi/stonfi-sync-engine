@@ -46,16 +46,19 @@ shutdown. Use `RunHandle::wait` only when every task can finish naturally.
 
 Consumers use the Git dependency documented in `README.md`. The crate requires
 a running Tokio runtime before `SyncEngine::run` is called and returns typed
-`SyncCoreError` values for configuration and consumer failures. Keep
-`SyncEngine::builder`, `Builder::add_sync`, and `Builder::add_initiator`
-fallible: validation intentionally happens at the boundary where each invalid
-state can first be detected.
+`SyncCoreError` values for configuration and consumer failures.
+`SyncEngine::builder` is infallible because it only stores the status manager;
+keep `Builder::add_sync` and `Builder::add_initiator` fallible because
+validation happens when each entity is registered.
 
 Engine metrics are private global collectors registered through
-`stonfi_metrics`. `SyncEngine::builder` initializes them and preserves its
-fallible return type. Applications call `stonfi_metrics::init_metrics!` during
-startup to initialize the global registry and optionally serve `/metrics`; do
-not reintroduce per-engine collector APIs or expose Prometheus types publicly.
+`stonfi_metrics::register_metrics!`. Applications call
+`stonfi_metrics::init_metrics!` during startup, before running an engine, to
+initialize the global registry and optionally serve `/metrics`. Metric helpers
+access the registered cells directly and therefore panic if startup skipped
+initialization. Do not initialize individual metric cells from engine
+constructors, add redundant availability checks, reintroduce per-engine
+collector APIs, or expose Prometheus types publicly.
 
 ## Invariants and pitfalls
 
