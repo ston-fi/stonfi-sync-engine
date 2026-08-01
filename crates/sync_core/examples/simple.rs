@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use stonfi_sync_core::errors::SyncCoreResult;
-use stonfi_sync_core::mem_status_manager::MemStatusManager;
+use stonfi_sync_core::mem_status_store::MemStatusStore;
 use stonfi_sync_core::sync_engine::{
     Initiator, SyncCallback, SyncEngine, SyncHandler, SyncHeight, SyncInitiator, SyncStatusStore, Synchronizer,
 };
@@ -101,9 +101,9 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt().with_env_filter(filter).init();
     stonfi_metrics::init_metrics!()?;
 
-    // `MemStatusManager` keeps synced heights in memory. It is useful for tests,
+    // `MemStatusStore` keeps synced heights in memory. It is useful for tests,
     // examples, and ephemeral tools. It returns `None` until something is saved.
-    let status_manager = Arc::new(MemStatusManager::new());
+    let status_store = Arc::new(MemStatusStore::new());
 
     let initiator = Initiator::new(ExampleInitiator {
         id: "example_initiator",
@@ -118,7 +118,7 @@ async fn main() -> anyhow::Result<()> {
     //
     // Passing `&initiator` makes the synchronizer depend on its progress. The
     // builder clones the progress receiver before taking ownership below.
-    let engine = SyncEngine::builder(status_manager.clone())
+    let engine = SyncEngine::builder(status_store.clone())
         .add_synchronizer(synchronizer, &[&initiator])?
         .add_initiator(initiator)?
         .add_callback(Arc::new(ExampleCallback))
@@ -135,7 +135,7 @@ async fn main() -> anyhow::Result<()> {
     // not wait for completion.
     run_handle.shutdown().await?;
 
-    let final_height = status_manager.load_synced_height("example_sync").await?;
+    let final_height = status_store.load_synced_height("example_sync").await?;
     tracing::info!("final synced height: {}", final_height.unwrap_or_default());
     tracing::info!("swap the toy initiator/handler with real implementations to build your service.");
 

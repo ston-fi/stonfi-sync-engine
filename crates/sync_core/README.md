@@ -111,10 +111,10 @@ where
 ## Public API
 
 Public items use module-qualified paths. Error types are under [`errors`], the
-in-memory status implementation is under [`mem_status_manager`], and engine types and
-extension traits are under [`sync_engine`]. The main types are [`SyncEngine`],
+in-memory status implementation is under [`mem_status_store`], and engine types
+and extension traits are under [`sync_engine`]. The main types are [`SyncEngine`],
 [`Builder`], [`Initiator`], [`Synchronizer`], [`RunHandle`], and
-[`MemStatusManager`]. Consumer-owned extension points are [`SyncInitiator`],
+[`MemStatusStore`]. Consumer-owned extension points are [`SyncInitiator`],
 [`SyncHandler`], [`SyncStatusStore`], [`SyncTrigger`], and [`SyncCallback`].
 Pass dependencies by reference to `Builder::add_synchronizer`; the builder
 clones their progress receivers before their owners are registered.
@@ -169,7 +169,7 @@ cargo package --list --locked -p stonfi_sync_core
 [`Builder`]: crate::sync_engine::Builder
 [`Builder::with_shutdown_timeout`]: crate::sync_engine::Builder::with_shutdown_timeout
 [`Initiator`]: crate::sync_engine::Initiator
-[`MemStatusManager`]: crate::mem_status_manager::MemStatusManager
+[`MemStatusStore`]: crate::mem_status_store::MemStatusStore
 [`RunHandle`]: crate::sync_engine::RunHandle
 [`RunHandle::shutdown`]: crate::sync_engine::RunHandle::shutdown
 [`RunHandle::wait`]: crate::sync_engine::RunHandle::wait
@@ -184,5 +184,5 @@ cargo package --list --locked -p stonfi_sync_core
 [`SyncTrigger`]: crate::sync_engine::SyncTrigger
 [`Synchronizer`]: crate::sync_engine::Synchronizer
 [`errors`]: crate::errors
-[`mem_status_manager`]: crate::mem_status_manager
+[`mem_status_store`]: crate::mem_status_store
 [`sync_engine`]: crate::sync_engine

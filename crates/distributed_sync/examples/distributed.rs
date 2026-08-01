@@ -8,7 +8,7 @@ use stonfi_distributed_sync::task::{EmptyTaskResult, RangeTask};
 use stonfi_distributed_sync::task_server::TaskServer;
 use stonfi_distributed_sync::worker::Worker;
 use stonfi_sync_core::errors::SyncCoreResult;
-use stonfi_sync_core::mem_status_manager::MemStatusManager;
+use stonfi_sync_core::mem_status_store::MemStatusStore;
 use stonfi_sync_core::sync_engine::{Initiator, SyncEngine, SyncHeight, SyncInitiator, SyncStatusStore, Synchronizer};
 
 struct OneHeightInitiator;
@@ -77,8 +77,8 @@ async fn main() -> anyhow::Result<()> {
     let worker_handle = worker.run();
 
     let initiator = Initiator::new(OneHeightInitiator);
-    let status_manager = Arc::new(MemStatusManager::new());
-    let engine = SyncEngine::builder(status_manager.clone())
+    let status_store = Arc::new(MemStatusStore::new());
+    let engine = SyncEngine::builder(status_store.clone())
         .add_synchronizer(Synchronizer::new(distributed), &[&initiator])?
         .add_initiator(initiator)?
         .build();
@@ -86,7 +86,7 @@ async fn main() -> anyhow::Result<()> {
 
     tokio::time::timeout(Duration::from_secs(2), async {
         loop {
-            if status_manager.load_synced_height("range").await? == Some(1) {
+            if status_store.load_synced_height("range").await? == Some(1) {
                 return Ok::<(), stonfi_sync_core::errors::SyncCoreError>(());
             }
             tokio::time::sleep(Duration::from_millis(10)).await;

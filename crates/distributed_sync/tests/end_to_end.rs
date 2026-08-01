@@ -9,7 +9,7 @@ use stonfi_distributed_sync::synchronizer::DistributedSynchronizer;
 use stonfi_distributed_sync::task_server::TaskServer;
 use stonfi_distributed_sync::worker::Worker;
 use stonfi_sync_core::errors::{SyncCoreError, SyncCoreResult};
-use stonfi_sync_core::mem_status_manager::MemStatusManager;
+use stonfi_sync_core::mem_status_store::MemStatusStore;
 use stonfi_sync_core::sync_engine::{
     Initiator, SyncEngine, SyncHandler, SyncHeight, SyncInitiator, SyncStatusStore, Synchronizer,
 };
@@ -231,8 +231,8 @@ async fn test_sync_engine_runs_through_server_and_worker() -> anyhow::Result<()>
     let handler = Arc::new(TestHandler::new("engine-end-to-end", false, Duration::from_millis(1)));
     let (distributed, worker, server) = setup(handler.clone(), 2).await?;
     let initiator = Initiator::new(OneHeightInitiator);
-    let status_manager = Arc::new(MemStatusManager::new());
-    let engine = SyncEngine::builder(status_manager.clone())
+    let status_store = Arc::new(MemStatusStore::new());
+    let engine = SyncEngine::builder(status_store.clone())
         .add_synchronizer(Synchronizer::new(distributed), &[&initiator])?
         .add_initiator(initiator)?
         .build()
@@ -240,7 +240,7 @@ async fn test_sync_engine_runs_through_server_and_worker() -> anyhow::Result<()>
 
     tokio::time::timeout(Duration::from_secs(1), async {
         loop {
-            if status_manager.load_synced_height(handler.id()).await? == Some(1) {
+            if status_store.load_synced_height(handler.id()).await? == Some(1) {
                 return Ok::<(), SyncCoreError>(());
             }
             tokio::task::yield_now().await;

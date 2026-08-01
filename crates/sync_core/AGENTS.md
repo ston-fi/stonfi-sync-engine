@@ -24,10 +24,10 @@ not add gRPC, protobuf, server, or worker dependencies to the core package.
 ## Public API and ownership
 
 Keep public paths module-qualified: errors and result types live in `errors`,
-the in-memory implementation lives in `mem_status_manager`, and all engine
+the in-memory implementation lives in `mem_status_store`, and all engine
 types and extension traits live in `sync_engine`. Do not add root re-exports.
 `SyncEngine`, `Builder`, `Initiator`, `Synchronizer`, `RunHandle`, and
-`MemStatusManager` are the primary consumer types. The five `Sync*` traits above
+`MemStatusStore` are the primary consumer types. The five `Sync*` traits above
 are intentional downstream extension points and must remain externally
 implementable.
 

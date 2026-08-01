@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+- Rename `MemStatusManager` to `MemStatusStore` and its module to
+  `mem_status_store`.
 - Emit diagnostics through `tracing` without embedded ANSI escape sequences.
 - Use `u64` for `SyncHeight` while preserving height `0` as the initial
   no-progress sentinel. Height gauges use unsigned storage; Prometheus
