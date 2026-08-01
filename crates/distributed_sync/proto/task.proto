@@ -1,0 +1,38 @@
+syntax = "proto3";
+
+package stonfi.distributed_sync.v1;
+
+service TaskService {
+  rpc Poll(PollRequest) returns (PollResponse);
+  rpc Complete(CompleteRequest) returns (CompleteResponse);
+}
+
+message PollRequest {
+  string worker_id = 1;
+  uint64 polling_timeout_ms = 2;
+  bool service_tasks_enabled = 3;
+}
+
+message PollResponse {
+  optional TaskAssignment task = 1;
+}
+
+message TaskAssignment {
+  uint64 assignment_id = 1;
+  string handler_id = 2;
+  bytes payload = 3;
+  uint64 timeout_ms = 4;
+  bool service_task = 5;
+}
+
+message CompleteRequest {
+  string worker_id = 1;
+  uint64 assignment_id = 2;
+
+  oneof outcome {
+    bytes result_payload = 3;
+    string error_message = 4;
+  }
+}
+
+message CompleteResponse {}
