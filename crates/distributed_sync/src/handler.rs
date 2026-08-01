@@ -76,9 +76,6 @@ pub trait DistributedSyncHandler: Send + Sync + 'static {
     /// Returns the stable ID used for routing, logging, metrics, and status.
     fn id(&self) -> &str;
 
-    /// Returns the initial committed height when status storage has no value.
-    fn initial_synced_height(&self) -> SyncHeight;
-
     /// Creates tasks for the inclusive engine range `[from, to]`.
     ///
     /// Return `Ok(None)` to ignore the range without advancing. Task results are

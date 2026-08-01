@@ -12,7 +12,7 @@ const SLEEP_IF_DISABLED: Duration = Duration::from_secs(1);
 pub(super) struct SyncCtx {
     pub receiver: MultiReceiver,
     pub cancellation: CancellationToken,
-    pub status_manager: Arc<dyn SyncStatusStore>,
+    pub status_store: Arc<dyn SyncStatusStore>,
     pub callbacks: Arc<CallbackStore>,
     pub log_progress: fn(SyncHeight, SyncHeight) -> bool,
 }
@@ -49,13 +49,9 @@ impl Synchronizer {
         let sync_id = self.handler.id().to_owned();
         let log_prefix = format!("SYNC][{sync_id}");
 
-        let mut synced_height = match self.load_synced_height_loop(&ctx, &log_prefix).await {
-            Some(height) => height,
-            None => {
-                let initial_synced_height = self.handler.initial_synced_height();
-                tracing::info!("[{log_prefix}] no persisted synced height, using initial: {initial_synced_height}");
-                initial_synced_height
-            },
+        let Some(mut synced_height) = self.load_synced_or_initial_loop(&ctx, &log_prefix).await else {
+            tracing::info!("[{log_prefix}] finished: shutdown requested");
+            return;
         };
 
         if ctx.cancellation.is_cancelled() {
@@ -271,15 +267,15 @@ impl Synchronizer {
         }
     }
 
-    async fn load_synced_height_loop(&mut self, ctx: &SyncCtx, log_prefix: &str) -> Option<SyncHeight> {
+    async fn load_synced_or_initial_loop(&mut self, ctx: &SyncCtx, log_prefix: &str) -> Option<SyncHeight> {
         loop {
             if ctx.cancellation.is_cancelled() {
                 return None;
             }
-            match ctx.status_manager.load_synced_height(self.handler.id()).await {
-                Ok(height) => break height,
+            match ctx.status_store.load_synced_or_initial(self.handler.id()).await {
+                Ok(height) => return Some(height),
                 Err(err) => {
-                    tracing::warn!("[{log_prefix}] .load_synced_height() returns error: {err}. Retrying...");
+                    tracing::warn!("[{log_prefix}] .load_synced_or_initial() returns error: {err}. Retrying...");
                     SyncEngineMetrics::inc_retries(self.handler.id(), SyncPhase::LoadHeight);
                     if sleep_or_cancelled(&ctx.cancellation, self.handler.retry_delay()).await {
                         return None;
@@ -294,7 +290,7 @@ impl Synchronizer {
             if ctx.cancellation.is_cancelled() {
                 return false;
             }
-            if let Err(err) = ctx.status_manager.save_synced_height(self.handler.id(), height).await {
+            if let Err(err) = ctx.status_store.save_synced_height(self.handler.id(), height).await {
                 tracing::warn!("[{log_prefix}] .save_synced_height({height}) returns error: {err}. Retrying...");
                 SyncEngineMetrics::inc_retries(self.handler.id(), SyncPhase::SaveHeight);
                 if sleep_or_cancelled(&ctx.cancellation, self.handler.retry_delay()).await {

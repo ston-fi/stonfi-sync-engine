@@ -28,10 +28,6 @@ impl SyncHandler for Processor {
         "external-processor"
     }
 
-    fn initial_synced_height(&self) -> SyncHeight {
-        0
-    }
-
     async fn sync_range(&mut self, _from: SyncHeight, to: SyncHeight) -> SyncCoreResult<Option<SyncHeight>> {
         Ok(Some(to))
     }
@@ -40,7 +36,7 @@ impl SyncHandler for Processor {
 fn main() -> SyncCoreResult<()> {
     let source = Initiator::new(Source);
     let processor = Synchronizer::new(Processor);
-    let _engine = SyncEngine::builder(Arc::new(MemStatusStore::new()))
+    let _engine = SyncEngine::builder(Arc::new(MemStatusStore::new(0)))
         .with_shutdown_timeout(Duration::from_secs(1))?
         .add_synchronizer(processor, &[&source])?
         .add_initiator(source)?

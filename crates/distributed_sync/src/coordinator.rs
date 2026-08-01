@@ -4,7 +4,7 @@ mod queue;
 use crate::proto::complete_request::Outcome;
 use crate::proto::{CompleteRequest, TaskAssignment};
 use crate::synchronizer::ErasedHandler;
-use crate::timeout_deadline;
+use crate::utils::timeout_deadline;
 use metrics::{CoordinatorMetrics, CoordinatorTaskStatus};
 use parking_lot::Mutex;
 use queue::TaskQueue;
@@ -362,10 +362,6 @@ mod tests {
 
         fn id(&self) -> &str {
             "test"
-        }
-
-        fn initial_synced_height(&self) -> SyncHeight {
-            0
         }
 
         async fn create_tasks(

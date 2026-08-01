@@ -1,6 +1,6 @@
 use crate::coordinator::{Coordinator, TaskPriority};
 use crate::handler::{DistributedSyncHandler, TaskPayload};
-use crate::{timeout_deadline, timeout_millis};
+use crate::utils::{timeout_deadline, validate_timeout_millis};
 use futures::future::try_join_all;
 use std::sync::Arc;
 use std::time::Duration;
@@ -22,40 +22,21 @@ impl DistributedSynchronizer {
     ///
     /// # Errors
     ///
-    /// Returns an error when the handler ID or synchronization timeout cannot
-    /// be represented by the distributed protocol.
+    /// Returns an error when the synchronization timeout cannot be represented
+    /// by the distributed protocol.
     pub fn new<H>(handler: Arc<H>, coordinator: Coordinator) -> SyncCoreResult<Self>
     where
         H: DistributedSyncHandler,
     {
-        validate_handler_id(handler.id())?;
-        let _ = timeout_millis(handler.sync_timeout(), "distributed handler synchronization timeout")?;
+        validate_timeout_millis(handler.sync_timeout(), "distributed handler synchronization timeout")?;
         Ok(Self { handler, coordinator })
     }
-}
-
-pub(crate) fn validate_handler_id(handler_id: &str) -> SyncCoreResult<()> {
-    if handler_id.is_empty() {
-        return Err(stonfi_sync_core::errors::SyncCoreError::invalid_args(
-            "distributed handler ID must not be empty",
-        ));
-    }
-    if handler_id.trim() != handler_id {
-        return Err(stonfi_sync_core::errors::SyncCoreError::invalid_args(
-            "distributed handler ID must not have leading or trailing whitespace",
-        ));
-    }
-    Ok(())
 }
 
 #[async_trait::async_trait]
 impl SyncHandler for DistributedSynchronizer {
     fn id(&self) -> &str {
         self.handler.id()
-    }
-
-    fn initial_synced_height(&self) -> SyncHeight {
-        self.handler.initial_synced_height()
     }
 
     async fn sync_range(&mut self, from: SyncHeight, to: SyncHeight) -> SyncCoreResult<Option<SyncHeight>> {
@@ -103,7 +84,6 @@ impl SyncHandler for DistributedSynchronizer {
 #[async_trait::async_trait]
 pub(crate) trait ErasedHandler: Send + Sync {
     fn id(&self) -> &str;
-    fn initial_synced_height(&self) -> SyncHeight;
     async fn create_tasks_bytes(
         &self,
         from: SyncHeight,
@@ -132,10 +112,6 @@ where
 {
     fn id(&self) -> &str {
         DistributedSyncHandler::id(self)
-    }
-
-    fn initial_synced_height(&self) -> SyncHeight {
-        DistributedSyncHandler::initial_synced_height(self)
     }
 
     async fn create_tasks_bytes(

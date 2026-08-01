@@ -36,7 +36,7 @@ pub type SyncHeight = u64;
 
 /// Coordinates initiators and synchronizers and runs the dependency graph.
 pub struct SyncEngine {
-    status_manager: Arc<dyn SyncStatusStore>,
+    status_store: Arc<dyn SyncStatusStore>,
     callbacks: Arc<CallbackStore>,
     log_progress: fn(SyncHeight, SyncHeight) -> bool,
     initiators: Vec<Initiator>,
@@ -45,10 +45,10 @@ pub struct SyncEngine {
 }
 
 impl SyncEngine {
-    /// Creates a builder backed by `status_manager`.
+    /// Creates a builder backed by `status_store`.
     #[must_use]
-    pub fn builder(status_manager: Arc<dyn SyncStatusStore>) -> Builder {
-        Builder::new(status_manager)
+    pub fn builder(status_store: Arc<dyn SyncStatusStore>) -> Builder {
+        Builder::new(status_store)
     }
 
     /// Consumes the engine definition and starts every registered initiator and
@@ -65,7 +65,7 @@ impl SyncEngine {
     /// startup has not called `stonfi_metrics::init_metrics!`.
     pub fn run(self) -> RunHandle {
         let Self {
-            status_manager,
+            status_store,
             callbacks,
             log_progress,
             initiators,
@@ -87,7 +87,7 @@ impl SyncEngine {
             let ctx = SyncCtx {
                 receiver: rcv,
                 cancellation: cancellation.clone(),
-                status_manager: status_manager.clone(),
+                status_store: status_store.clone(),
                 callbacks: callbacks.clone(),
                 log_progress,
             };

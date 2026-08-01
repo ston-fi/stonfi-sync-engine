@@ -3,6 +3,9 @@ use crate::sync_engine::SyncHeight;
 use crate::sync_engine::multi_receiver::SyncReceiver;
 use std::time::Duration;
 
+/// Status-store ID reserved for the engine-wide initial synced height.
+pub const INITIAL_SYNC_ID: &str = "INITIAL";
+
 /// Produces the latest height that dependent synchronizers may process.
 ///
 /// `id()` must be stable for the lifetime of the engine and unique among all
@@ -31,11 +34,6 @@ pub trait SyncInitiator: Send + 'static {
 pub trait SyncHandler: Send + 'static {
     /// Returns the stable identifier used in logs, metrics, and status storage.
     fn id(&self) -> &str;
-    /// Returns the starting synced height used when no persisted height exists.
-    ///
-    /// This value is an in-memory fallback owned by the handler. The engine
-    /// does not persist it until a successful sync saves a new height.
-    fn initial_synced_height(&self) -> SyncHeight;
     /// Processes the inclusive range `[from, to]`.
     ///
     /// The engine guarantees `from <= to` and, when the method is called,
@@ -72,20 +70,40 @@ pub trait SyncHandler: Send + 'static {
     fn allow_rewind(&self) -> bool { false }
 }
 
-/// Stores and restores the latest synced height for handlers.
+/// Stores synced heights and supplies the engine-wide initial fallback.
 ///
-/// The engine retries both methods while it remains active.
-/// A given sync ID must have only one active engine writer; this interface does
-/// not provide compare-and-set semantics for multi-process coordination.
+/// Only one active engine may write an ID, including [`INITIAL_SYNC_ID`]; this
+/// trait does not provide compare-and-set coordination.
 #[rustfmt::skip]
 #[async_trait::async_trait]
 pub trait SyncStatusStore: Send + Sync + 'static {
+    /// Returns the configured fallback used to initialize [`INITIAL_SYNC_ID`].
+    fn initial_synced_height(&self) -> SyncHeight;
     /// Stores the latest durably synced height for `sync_id`.
     async fn save_synced_height(&self, sync_id: &str, sync_height: SyncHeight) -> SyncCoreResult<()>;
     /// Loads the latest persisted synced height for `sync_id`.
     ///
     /// Returns `Ok(None)` when the sync has not been persisted yet.
     async fn load_synced_height(&self, sync_id: &str) -> SyncCoreResult<Option<SyncHeight>>;
+    /// Loads `sync_id`, falling back to [`INITIAL_SYNC_ID`].
+    ///
+    /// If neither exists, stores and returns [`Self::initial_synced_height`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when loading or initializing status storage fails.
+    async fn load_synced_or_initial(&self, sync_id: &str) -> SyncCoreResult<SyncHeight> {
+        if let Some(sync_height) = self.load_synced_height(sync_id).await? {
+            return Ok(sync_height);
+        }
+        if let Some(initial_synced_height) = self.load_synced_height(INITIAL_SYNC_ID).await? {
+            return Ok(initial_synced_height);
+        }
+
+        let initial_synced_height = self.initial_synced_height();
+        self.save_synced_height(INITIAL_SYNC_ID, initial_synced_height).await?;
+        Ok(initial_synced_height)
+    }
 }
 
 /// Exposes a progress stream that other synchronizers can depend on.

@@ -44,10 +44,6 @@ impl SyncHandler for ExampleHandler {
         self.id
     }
 
-    fn initial_synced_height(&self) -> SyncHeight {
-        0
-    }
-
     async fn sync_range(&mut self, from: SyncHeight, to: SyncHeight) -> SyncCoreResult<Option<SyncHeight>> {
         tracing::info!("handler {} processed range [{from}, {to}]", self.id);
         tokio::time::sleep(Duration::from_millis(30)).await;
@@ -101,9 +97,10 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt().with_env_filter(filter).init();
     stonfi_metrics::init_metrics!()?;
 
-    // `MemStatusStore` keeps synced heights in memory. It is useful for tests,
-    // examples, and ephemeral tools. It returns `None` until something is saved.
-    let status_store = Arc::new(MemStatusStore::new());
+    // `MemStatusStore` keeps synced heights in memory. The constructor's `0`
+    // configures the engine-wide fallback that is stored under `INITIAL` when
+    // the first synchronizer starts without persisted status.
+    let status_store = Arc::new(MemStatusStore::new(0));
 
     let initiator = Initiator::new(ExampleInitiator {
         id: "example_initiator",

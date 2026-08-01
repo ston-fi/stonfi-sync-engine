@@ -81,6 +81,24 @@ where
 }
 ```
 
+## Initial status
+
+`SyncStatusStore` owns the engine-wide initial synced height. Construct the
+store with the fallback selected by application configuration; for example,
+`MemStatusStore::new(0)` uses the no-progress sentinel. When a synchronizer
+starts, [`SyncStatusStore::load_synced_or_initial`] resolves state in this
+order:
+
+1. the synchronizer's own persisted ID;
+2. the persisted [`INITIAL_SYNC_ID`] value; or
+3. the store's configured fallback, saved under `INITIAL_SYNC_ID` before it is
+   returned.
+
+`INITIAL_SYNC_ID` is reserved storage state. It cannot be registered as an
+initiator or synchronizer and never participates in the dependency graph.
+Only one active engine may initialize or write it because status stores do not
+provide compare-and-set coordination.
+
 ## Lifecycle and failure behavior
 
 - [`SyncEngine::run`] consumes the engine and returns its only runtime owner.
@@ -124,6 +142,11 @@ Initiators and handlers are owned by one engine task and need only implement
 implementations can update their own fields without internal locking. Status
 stores and callbacks are shared between tasks and therefore remain
 `Send + Sync + 'static`.
+
+Store implementations provide [`SyncStatusStore::initial_synced_height`] from
+constructor or application configuration. The trait's default
+`load_synced_or_initial` implementation owns the durable fallback algorithm;
+handlers only process ranges.
 
 ## Metrics
 
@@ -179,8 +202,11 @@ cargo package --list --locked -p stonfi_sync_core
 [`SyncEngine::run`]: crate::sync_engine::SyncEngine::run
 [`SyncHandler`]: crate::sync_engine::SyncHandler
 [`SyncHandler::sync_range`]: crate::sync_engine::SyncHandler::sync_range
+[`INITIAL_SYNC_ID`]: crate::sync_engine::INITIAL_SYNC_ID
 [`SyncInitiator`]: crate::sync_engine::SyncInitiator
 [`SyncStatusStore`]: crate::sync_engine::SyncStatusStore
+[`SyncStatusStore::initial_synced_height`]: crate::sync_engine::SyncStatusStore::initial_synced_height
+[`SyncStatusStore::load_synced_or_initial`]: crate::sync_engine::SyncStatusStore::load_synced_or_initial
 [`SyncTrigger`]: crate::sync_engine::SyncTrigger
 [`Synchronizer`]: crate::sync_engine::Synchronizer
 [`errors`]: crate::errors

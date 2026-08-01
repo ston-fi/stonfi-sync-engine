@@ -76,6 +76,8 @@ Workers use [`std::thread::available_parallelism`] by default. Call
 Register the returned `Synchronizer` with `stonfi_sync_core::SyncEngine`. On
 shutdown, stop the core engine before the worker and server. See
 [`examples/distributed.rs`](examples/distributed.rs) for the complete workflow.
+Initial-height configuration belongs to the core `SyncStatusStore`; distributed
+handlers define task behavior only.
 
 ## Delivery and ordering
 

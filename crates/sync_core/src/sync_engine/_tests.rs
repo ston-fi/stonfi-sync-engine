@@ -69,9 +69,6 @@ impl SyncHandler for TestSync {
     fn id(&self) -> &str {
         &self.id
     }
-    fn initial_synced_height(&self) -> SyncHeight {
-        0
-    }
     async fn sync_range(&mut self, _from: SyncHeight, to: SyncHeight) -> SyncCoreResult<Option<SyncHeight>> {
         self.ranges.set(self.ranges.get() + 1);
         tokio::time::sleep(self.delay).await;
@@ -79,21 +76,42 @@ impl SyncHandler for TestSync {
     }
 }
 
-struct TestStatusManager {
+struct TestStatusStore {
+    initial_synced_height: SyncHeight,
+    initial_save_failures: AtomicUsize,
     storage: RwLock<HashMap<String, Vec<SyncHeight>>>,
 }
 
-impl TestStatusManager {
-    pub fn new() -> Self {
+impl TestStatusStore {
+    pub fn new(initial_synced_height: SyncHeight) -> Self {
         Self {
+            initial_synced_height,
+            initial_save_failures: AtomicUsize::new(0),
             storage: RwLock::new(HashMap::new()),
         }
+    }
+
+    fn with_initial_save_failures(mut self, failures: usize) -> Self {
+        self.initial_save_failures = AtomicUsize::new(failures);
+        self
     }
 }
 
 #[async_trait::async_trait]
-impl SyncStatusStore for TestStatusManager {
+impl SyncStatusStore for TestStatusStore {
+    fn initial_synced_height(&self) -> SyncHeight {
+        self.initial_synced_height
+    }
+
     async fn save_synced_height(&self, sync_id: &str, sync_height: SyncHeight) -> SyncCoreResult<()> {
+        if sync_id == INITIAL_SYNC_ID
+            && self
+                .initial_save_failures
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| remaining.checked_sub(1))
+                .is_ok()
+        {
+            return Err(SyncCoreError::custom("configured initial save failure"));
+        }
         self.storage.write().entry(sync_id.to_owned()).or_default().push(sync_height);
         Ok(())
     }
@@ -134,21 +152,21 @@ async fn test_initial_initiator_height_is_published() -> anyhow::Result<()> {
         }
     }
 
-    let status_manager = Arc::new(TestStatusManager::new());
+    let status_store = Arc::new(TestStatusStore::new(0));
     let initiator: Initiator = FixedInitiator {
         id: "fixed_initial_height".to_string(),
     }
     .into();
     let sync_id = "sync_initial_publish".to_string();
     let sync = TestSync::new(&sync_id, 0).into();
-    let engine = SyncEngine::builder(status_manager.clone())
+    let engine = SyncEngine::builder(status_store.clone())
         .add_synchronizer(sync, &[&initiator])?
         .add_initiator(initiator)?
         .build();
 
     let run_handle = engine.run();
     tokio::time::timeout(Duration::from_millis(500), async {
-        while status_manager.load_synced_height(&sync_id).await? != Some(7) {
+        while status_store.load_synced_height(&sync_id).await? != Some(7) {
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
         Ok::<(), SyncCoreError>(())
@@ -177,9 +195,6 @@ impl SyncHandler for TestSyncRanged {
     fn id(&self) -> &str {
         &self.id
     }
-    fn initial_synced_height(&self) -> SyncHeight {
-        0
-    }
     async fn sync_range(&mut self, _from: SyncHeight, to: SyncHeight) -> SyncCoreResult<Option<SyncHeight>> {
         tokio::time::sleep(self.delay).await;
         Ok(Some(to))
@@ -196,19 +211,19 @@ impl SyncHandler for TestSyncRanged {
 async fn test_sync_respects_fixed_batch_size() -> anyhow::Result<()> {
     init_test_runtime()?;
     let initializer: Initiator = TestInitiator::new("test_init1_ranged", 5).into();
-    let status_manager = Arc::new(TestStatusManager::new());
+    let status_store = Arc::new(TestStatusStore::new(0));
 
     let sync_id = "sync_ranged".to_string();
     let sync = TestSyncRanged::new(&sync_id, 20).into();
 
-    let engine = SyncEngine::builder(status_manager.clone())
+    let engine = SyncEngine::builder(status_store.clone())
         .add_synchronizer(sync, &[&initializer])?
         .add_initiator(initializer)?
         .build();
 
     shutdown_engine_after(engine.run(), Duration::from_millis(300)).await?;
 
-    let sync_statuses = status_manager
+    let sync_statuses = status_store
         .storage
         .read()
         .get(&sync_id)
@@ -226,7 +241,7 @@ async fn test_sync_respects_fixed_batch_size() -> anyhow::Result<()> {
 async fn test_success_callbacks_are_invoked() -> anyhow::Result<()> {
     init_test_runtime()?;
     let initializer: Initiator = TestInitiator::new("test_init1_callback", 5).into();
-    let status_manager = Arc::new(TestStatusManager::new());
+    let status_store = Arc::new(TestStatusStore::new(0));
 
     let sync_id = "sync_callback".to_string();
     let sync = TestSyncRanged::new(&sync_id, 20).into();
@@ -264,7 +279,7 @@ async fn test_success_callbacks_are_invoked() -> anyhow::Result<()> {
     let events = Arc::new(AtomicUsize::new(0));
     let callback = Arc::new(TestCallback(events.clone()));
 
-    let engine = SyncEngine::builder(status_manager.clone())
+    let engine = SyncEngine::builder(status_store.clone())
         .add_synchronizer(sync, &[&initializer])?
         .add_initiator(initializer)?
         .add_callback(callback)
@@ -281,11 +296,11 @@ async fn test_builder_rejects_duplicate_sync_ids() -> anyhow::Result<()> {
     init_test_runtime()?;
 
     let initializer: Initiator = TestInitiator::new("test_init_dup_sync", 5).into();
-    let status_manager = Arc::new(TestStatusManager::new());
+    let status_store = Arc::new(TestStatusStore::new(0));
     let sync_1 = TestSync::new("sync_duplicate", 5).into();
     let sync_2 = TestSync::new("sync_duplicate", 5).into();
 
-    let builder = SyncEngine::builder(status_manager).add_synchronizer(sync_1, &[&initializer])?;
+    let builder = SyncEngine::builder(status_store).add_synchronizer(sync_1, &[&initializer])?;
     let err = match builder.add_synchronizer(sync_2, &[&initializer]) {
         Ok(_) => return Err(anyhow::anyhow!("duplicate sync id should fail")),
         Err(err) => err,
@@ -294,16 +309,36 @@ async fn test_builder_rejects_duplicate_sync_ids() -> anyhow::Result<()> {
 
     let init_1 = TestInitiator::new("duplicate_entity", 5).into();
     let init_2 = TestInitiator::new("duplicate_entity", 5).into();
-    let builder = SyncEngine::builder(Arc::new(TestStatusManager::new())).add_initiator(init_1)?;
+    let builder = SyncEngine::builder(Arc::new(TestStatusStore::new(0))).add_initiator(init_1)?;
     assert!(matches!(builder.add_initiator(init_2), Err(SyncCoreError::Logic(_))));
 
     let trigger: Initiator = TestInitiator::new("trigger", 5).into();
     let sync = TestSync::new("shared_entity", 5).into();
     let colliding_initiator = TestInitiator::new("shared_entity", 5).into();
-    let builder = SyncEngine::builder(Arc::new(TestStatusManager::new())).add_synchronizer(sync, &[&trigger])?;
+    let builder = SyncEngine::builder(Arc::new(TestStatusStore::new(0))).add_synchronizer(sync, &[&trigger])?;
     assert!(matches!(
         builder.add_initiator(colliding_initiator),
         Err(SyncCoreError::Logic(_))
+    ));
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_builder_rejects_reserved_initial_sync_id() -> anyhow::Result<()> {
+    init_test_runtime()?;
+
+    let status_store = Arc::new(TestStatusStore::new(0));
+    let initiator: Initiator = TestInitiator::new(INITIAL_SYNC_ID, 5).into();
+    assert!(matches!(
+        SyncEngine::builder(status_store.clone()).add_initiator(initiator),
+        Err(SyncCoreError::InvalidArgs(_))
+    ));
+
+    let trigger: Initiator = TestInitiator::new("reserved_id_trigger", 5).into();
+    let synchronizer = TestSync::new(INITIAL_SYNC_ID, 5).into();
+    assert!(matches!(
+        SyncEngine::builder(status_store).add_synchronizer(synchronizer, &[&trigger]),
+        Err(SyncCoreError::InvalidArgs(_))
     ));
     Ok(())
 }
@@ -322,10 +357,6 @@ async fn test_builder_rejects_invalid_batch_sizes() -> anyhow::Result<()> {
     impl SyncHandler for InvalidRangeSync {
         fn id(&self) -> &str {
             &self.id
-        }
-
-        fn initial_synced_height(&self) -> SyncHeight {
-            0
         }
 
         async fn sync_range(&mut self, _: SyncHeight, _: SyncHeight) -> SyncCoreResult<Option<SyncHeight>> {
@@ -351,7 +382,7 @@ async fn test_builder_rejects_invalid_batch_sizes() -> anyhow::Result<()> {
             max,
         }
         .into();
-        let builder = SyncEngine::builder(Arc::new(TestStatusManager::new()));
+        let builder = SyncEngine::builder(Arc::new(TestStatusStore::new(0)));
         assert!(matches!(
             builder.add_synchronizer(sync, &[&trigger]),
             Err(SyncCoreError::Logic(_))
@@ -368,10 +399,6 @@ fn test_maximum_remaining_range_does_not_overflow() {
     impl SyncHandler for MaximumRangeSync {
         fn id(&self) -> &str {
             "maximum_range"
-        }
-
-        fn initial_synced_height(&self) -> SyncHeight {
-            0
         }
 
         async fn sync_range(&mut self, _: SyncHeight, to: SyncHeight) -> SyncCoreResult<Option<SyncHeight>> {
@@ -406,9 +433,6 @@ impl SyncHandler for TestSyncPartial {
     fn id(&self) -> &str {
         &self.id
     }
-    fn initial_synced_height(&self) -> SyncHeight {
-        0
-    }
     async fn sync_range(&mut self, from: SyncHeight, to: SyncHeight) -> SyncCoreResult<Option<SyncHeight>> {
         tokio::time::sleep(self.delay).await;
         Ok(Some(std::cmp::min(from, to)))
@@ -425,7 +449,7 @@ impl SyncHandler for TestSyncPartial {
 async fn test_partial_sync_propagates_processed_height_to_children() -> anyhow::Result<()> {
     init_test_runtime()?;
     let initializer: Initiator = TestInitiator::new("test_init_partial", 2).into();
-    let status_manager = Arc::new(TestStatusManager::new());
+    let status_store = Arc::new(TestStatusStore::new(0));
 
     let sync_a_id = "sync_parent_partial".to_string();
     let sync_b_id = "sync_child_partial".to_string();
@@ -433,7 +457,7 @@ async fn test_partial_sync_propagates_processed_height_to_children() -> anyhow::
     let sync_a_trigger = TestTrigger(sync_a.receiver());
     let sync_b = TestSync::new(&sync_b_id, 1).into();
 
-    let engine = SyncEngine::builder(status_manager.clone())
+    let engine = SyncEngine::builder(status_store.clone())
         .add_synchronizer(sync_a, &[&initializer])?
         .add_synchronizer(sync_b, &[&sync_a_trigger])?
         .add_initiator(initializer)?
@@ -442,11 +466,11 @@ async fn test_partial_sync_propagates_processed_height_to_children() -> anyhow::
     let run_handle = engine.run();
     shutdown_engine_after(run_handle, Duration::from_millis(400)).await?;
 
-    let parent_height = status_manager
+    let parent_height = status_store
         .load_synced_height(&sync_a_id)
         .await?
         .ok_or_else(|| anyhow::anyhow!("missing synced height for {sync_a_id}"))?;
-    let child_height = status_manager
+    let child_height = status_store
         .load_synced_height(&sync_b_id)
         .await?
         .ok_or_else(|| anyhow::anyhow!("missing synced height for {sync_b_id}"))?;
@@ -478,10 +502,6 @@ impl SyncHandler for TestIgnoreThenSync {
         &self.id
     }
 
-    fn initial_synced_height(&self) -> SyncHeight {
-        0
-    }
-
     async fn sync_range(&mut self, from: SyncHeight, to: SyncHeight) -> SyncCoreResult<Option<SyncHeight>> {
         self.ranges.lock().push((from, to));
         if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
@@ -508,7 +528,7 @@ impl SyncHandler for TestIgnoreThenSync {
 async fn test_ignored_range() -> anyhow::Result<()> {
     init_test_runtime()?;
 
-    let status_manager = Arc::new(TestStatusManager::new());
+    let status_store = Arc::new(TestStatusStore::new(0));
     let parent_calls = Arc::new(AtomicUsize::new(0));
     let parent_ranges = Arc::new(Mutex::new(vec![]));
     let parent_sync_id = "sync_ignore_parent".to_string();
@@ -522,7 +542,7 @@ async fn test_ignored_range() -> anyhow::Result<()> {
     let (trigger_tx, trigger_rx) = tokio::sync::watch::channel(0);
     let trigger = TestTrigger(trigger_rx);
 
-    let engine = SyncEngine::builder(status_manager.clone())
+    let engine = SyncEngine::builder(status_store.clone())
         .add_synchronizer(parent_sync, &[&trigger])?
         .add_synchronizer(child_sync, &[&parent_trigger])?
         .build();
@@ -533,8 +553,8 @@ async fn test_ignored_range() -> anyhow::Result<()> {
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     assert_eq!(1, parent_calls.load(Ordering::SeqCst));
-    assert_eq!(None, status_manager.load_synced_height(&parent_sync_id).await?);
-    assert_eq!(None, status_manager.load_synced_height(&child_sync_id).await?);
+    assert_eq!(None, status_store.load_synced_height(&parent_sync_id).await?);
+    assert_eq!(None, status_store.load_synced_height(&child_sync_id).await?);
 
     trigger_tx.send(6)?;
     tokio::time::sleep(Duration::from_millis(150)).await;
@@ -545,8 +565,8 @@ async fn test_ignored_range() -> anyhow::Result<()> {
     // The configured range limits intentionally produce this sequence.
     assert_eq!(3, parent_calls.load(Ordering::SeqCst));
     assert_eq!(vec![(1, 3), (1, 4), (5, 6)], *parent_ranges.lock());
-    assert_eq!(Some(6), status_manager.load_synced_height(&parent_sync_id).await?);
-    assert!(status_manager.load_synced_height(&child_sync_id).await?.unwrap_or_default() > 0);
+    assert_eq!(Some(6), status_store.load_synced_height(&parent_sync_id).await?);
+    assert!(status_store.load_synced_height(&child_sync_id).await?.unwrap_or_default() > 0);
     Ok(())
 }
 
@@ -563,10 +583,6 @@ async fn test_reenabled_sync_uses_existing_upstream_height() -> anyhow::Result<(
     impl SyncHandler for EnabledSync {
         fn id(&self) -> &str {
             &self.id
-        }
-
-        fn initial_synced_height(&self) -> SyncHeight {
-            0
         }
 
         fn is_enabled(&self) -> bool {
@@ -587,8 +603,8 @@ async fn test_reenabled_sync_uses_existing_upstream_height() -> anyhow::Result<(
     .into();
     let (trigger_tx, trigger_rx) = tokio::sync::watch::channel(1);
     let trigger = TestTrigger(trigger_rx);
-    let status_manager = Arc::new(TestStatusManager::new());
-    let engine = SyncEngine::builder(status_manager.clone())
+    let status_store = Arc::new(TestStatusStore::new(0));
+    let engine = SyncEngine::builder(status_store.clone())
         .add_synchronizer(sync, &[&trigger])?
         .build();
 
@@ -596,7 +612,7 @@ async fn test_reenabled_sync_uses_existing_upstream_height() -> anyhow::Result<(
     tokio::time::sleep(Duration::from_millis(50)).await;
     enabled.store(true, Ordering::SeqCst);
     tokio::time::timeout(Duration::from_millis(1500), async {
-        while status_manager.load_synced_height(&sync_id).await? != Some(1) {
+        while status_store.load_synced_height(&sync_id).await? != Some(1) {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         Ok::<(), SyncCoreError>(())
@@ -626,9 +642,6 @@ impl SyncHandler for TestSyncFailFirst {
     fn id(&self) -> &str {
         &self.id
     }
-    fn initial_synced_height(&self) -> SyncHeight {
-        0
-    }
     async fn sync_range(&mut self, _from: SyncHeight, to: SyncHeight) -> SyncCoreResult<Option<SyncHeight>> {
         if self.attempts.fetch_add(1, Ordering::SeqCst) == 0 {
             Err(SyncCoreError::custom("fail_once"))
@@ -657,7 +670,7 @@ impl SyncCallback for TestSyncErrorCallback {
 async fn test_on_sync_error_callback_is_invoked() -> anyhow::Result<()> {
     init_test_runtime()?;
     let initializer: Initiator = TestInitiator::new("test_init_sync_error_callback", 2).into();
-    let status_manager = Arc::new(TestStatusManager::new());
+    let status_store = Arc::new(TestStatusStore::new(0));
     let attempts = Arc::new(AtomicUsize::new(0));
     let sync_id = "sync_error_callback".to_string();
     let sync = TestSyncFailFirst::new(&sync_id, attempts).into();
@@ -666,7 +679,7 @@ async fn test_on_sync_error_callback_is_invoked() -> anyhow::Result<()> {
         calls: sync_error_calls.clone(),
     });
 
-    let engine = SyncEngine::builder(status_manager)
+    let engine = SyncEngine::builder(status_store)
         .add_synchronizer(sync, &[&initializer])?
         .add_initiator(initializer)?
         .add_callback(callback)
@@ -697,9 +710,6 @@ impl SyncHandler for TestSyncInvalidFirst {
     fn id(&self) -> &str {
         &self.id
     }
-    fn initial_synced_height(&self) -> SyncHeight {
-        0
-    }
     async fn sync_range(&mut self, from: SyncHeight, to: SyncHeight) -> SyncCoreResult<Option<SyncHeight>> {
         if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
             Ok(Some(to + 1))
@@ -716,12 +726,12 @@ impl SyncHandler for TestSyncInvalidFirst {
 async fn test_invalid_synced_height_is_retried_and_not_saved() -> anyhow::Result<()> {
     init_test_runtime()?;
     let initializer: Initiator = TestInitiator::new("test_init_invalid_height", 2).into();
-    let status_manager = Arc::new(TestStatusManager::new());
+    let status_store = Arc::new(TestStatusStore::new(0));
     let sync_calls = Arc::new(AtomicUsize::new(0));
     let sync_id = "sync_invalid_height".to_string();
     let sync = TestSyncInvalidFirst::new(&sync_id, sync_calls.clone()).into();
 
-    let engine = SyncEngine::builder(status_manager.clone())
+    let engine = SyncEngine::builder(status_store.clone())
         .add_synchronizer(sync, &[&initializer])?
         .add_initiator(initializer)?
         .build();
@@ -729,7 +739,7 @@ async fn test_invalid_synced_height_is_retried_and_not_saved() -> anyhow::Result
     let run_handle = engine.run();
     shutdown_engine_after(run_handle, Duration::from_millis(400)).await?;
 
-    let statuses = status_manager.storage.read().get(&sync_id).cloned().unwrap_or_default();
+    let statuses = status_store.storage.read().get(&sync_id).cloned().unwrap_or_default();
     assert!(!statuses.is_empty());
     assert_eq!(1, statuses[0]);
     assert!(sync_calls.load(Ordering::SeqCst) >= 2);
@@ -744,10 +754,6 @@ struct TestSyncTimesOutFirst {
 impl SyncHandler for TestSyncTimesOutFirst {
     fn id(&self) -> &str {
         "sync_timeout_retry"
-    }
-
-    fn initial_synced_height(&self) -> SyncHeight {
-        0
     }
 
     async fn sync_range(&mut self, from: SyncHeight, to: SyncHeight) -> SyncCoreResult<Option<SyncHeight>> {
@@ -775,17 +781,17 @@ impl SyncHandler for TestSyncTimesOutFirst {
 async fn test_timed_out_range_is_retried_at_least_once() -> anyhow::Result<()> {
     init_test_runtime()?;
     let initializer: Initiator = TestInitiator::new("test_init_timeout_retry", 2).into();
-    let status_manager = Arc::new(TestStatusManager::new());
+    let status_store = Arc::new(TestStatusStore::new(0));
     let ranges = Arc::new(Mutex::new(Vec::new()));
     let sync: Synchronizer = TestSyncTimesOutFirst { ranges: ranges.clone() }.into();
-    let engine = SyncEngine::builder(status_manager.clone())
+    let engine = SyncEngine::builder(status_store.clone())
         .add_synchronizer(sync, &[&initializer])?
         .add_initiator(initializer)?
         .build();
     let run_handle = engine.run();
 
     tokio::time::timeout(Duration::from_millis(500), async {
-        while status_manager.storage.read().get("sync_timeout_retry").is_none() {
+        while status_store.storage.read().get("sync_timeout_retry").is_none() {
             tokio::task::yield_now().await;
         }
     })
@@ -816,9 +822,6 @@ impl TestRewindSync {
 impl SyncHandler for TestRewindSync {
     fn id(&self) -> &str {
         &self.id
-    }
-    fn initial_synced_height(&self) -> SyncHeight {
-        0
     }
 
     async fn sync_range(&mut self, from: SyncHeight, _to: SyncHeight) -> SyncCoreResult<Option<SyncHeight>> {
@@ -851,7 +854,7 @@ async fn test_allow_rewind_accepts_rewound_height_without_retry() -> anyhow::Res
         }
     }
 
-    let status_manager = Arc::new(TestStatusManager::new());
+    let status_store = Arc::new(TestStatusStore::new(0));
     let sync_calls = Arc::new(AtomicUsize::new(0));
     let sync_id = "sync_allow_rewind".to_string();
     let sync = TestRewindSync::new(&sync_id, sync_calls.clone()).into();
@@ -861,7 +864,7 @@ async fn test_allow_rewind_accepts_rewound_height_without_retry() -> anyhow::Res
         trigger_sender: Arc::new(Mutex::new(Some(trigger_tx))),
     });
 
-    let engine = SyncEngine::builder(status_manager.clone())
+    let engine = SyncEngine::builder(status_store.clone())
         .add_synchronizer(sync, &[&trigger])?
         .add_callback(callback)
         .build();
@@ -869,7 +872,7 @@ async fn test_allow_rewind_accepts_rewound_height_without_retry() -> anyhow::Res
     let run_handle = engine.run();
     shutdown_engine_after(run_handle, Duration::from_millis(200)).await?;
 
-    let statuses = status_manager.storage.read().get(&sync_id).cloned().unwrap_or_default();
+    let statuses = status_store.storage.read().get(&sync_id).cloned().unwrap_or_default();
     assert_eq!(vec![0], statuses);
     assert_eq!(1, sync_calls.load(Ordering::SeqCst));
     Ok(())
@@ -895,10 +898,6 @@ impl SyncHandler for TestNoRewindSync {
         &self.id
     }
 
-    fn initial_synced_height(&self) -> SyncHeight {
-        0
-    }
-
     async fn sync_range(&mut self, from: SyncHeight, _to: SyncHeight) -> SyncCoreResult<Option<SyncHeight>> {
         if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
             Ok(Some(from - 1))
@@ -916,12 +915,12 @@ impl SyncHandler for TestNoRewindSync {
 async fn test_rewound_height_is_retried_when_allow_rewind_is_false() -> anyhow::Result<()> {
     init_test_runtime()?;
     let initializer: Initiator = TestInitiator::new("test_init_no_rewind", 2).into();
-    let status_manager = Arc::new(TestStatusManager::new());
+    let status_store = Arc::new(TestStatusStore::new(0));
     let sync_calls = Arc::new(AtomicUsize::new(0));
     let sync_id = "sync_no_rewind".to_string();
     let sync = TestNoRewindSync::new(&sync_id, sync_calls.clone()).into();
 
-    let engine = SyncEngine::builder(status_manager.clone())
+    let engine = SyncEngine::builder(status_store.clone())
         .add_synchronizer(sync, &[&initializer])?
         .add_initiator(initializer)?
         .with_log_progress(|_from, to| to % 10 == 0)
@@ -930,7 +929,7 @@ async fn test_rewound_height_is_retried_when_allow_rewind_is_false() -> anyhow::
     let run_handle = engine.run();
     shutdown_engine_after(run_handle, Duration::from_millis(400)).await?;
 
-    let statuses = status_manager.storage.read().get(&sync_id).cloned().unwrap_or_default();
+    let statuses = status_store.storage.read().get(&sync_id).cloned().unwrap_or_default();
     assert!(!statuses.is_empty());
     assert_eq!(1, statuses[0]);
     assert!(sync_calls.load(Ordering::SeqCst) >= 2);
@@ -1002,7 +1001,7 @@ async fn test_initiator_callback_retries_same_event() -> anyhow::Result<()> {
         second_attempt: Notify::new(),
         release: Notify::new(),
     });
-    let engine = SyncEngine::builder(Arc::new(TestStatusManager::new()))
+    let engine = SyncEngine::builder(Arc::new(TestStatusStore::new(0)))
         .add_initiator(initiator)?
         .add_callback(callback.clone())
         .build();
@@ -1087,10 +1086,6 @@ impl SyncHandler for TestCountingSync {
         &self.id
     }
 
-    fn initial_synced_height(&self) -> SyncHeight {
-        0
-    }
-
     async fn sync_range(&mut self, _from: SyncHeight, to: SyncHeight) -> SyncCoreResult<Option<SyncHeight>> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         Ok(Some(to))
@@ -1104,7 +1099,7 @@ impl SyncHandler for TestCountingSync {
 #[tokio::test]
 async fn test_on_sync_complete_callback_failure_does_not_rerun_sync_range() -> anyhow::Result<()> {
     init_test_runtime()?;
-    let status_manager = Arc::new(TestStatusManager::new());
+    let status_store = Arc::new(TestStatusStore::new(0));
     let initiator_calls = Arc::new(AtomicUsize::new(0));
     let initiator: Initiator = TestStepInitiator::new("test_init_complete_callback", initiator_calls.clone()).into();
     let sync_calls = Arc::new(AtomicUsize::new(0));
@@ -1114,7 +1109,7 @@ async fn test_on_sync_complete_callback_failure_does_not_rerun_sync_range() -> a
         calls: callback_calls.clone(),
     });
 
-    let engine = SyncEngine::builder(status_manager.clone())
+    let engine = SyncEngine::builder(status_store.clone())
         .add_synchronizer(sync, &[&initiator])?
         .add_initiator(initiator)?
         .add_callback(callback)
@@ -1126,7 +1121,7 @@ async fn test_on_sync_complete_callback_failure_does_not_rerun_sync_range() -> a
     assert_eq!(2, sync_calls.load(Ordering::SeqCst));
     assert_eq!(3, callback_calls.load(Ordering::SeqCst));
     assert!(initiator_calls.load(Ordering::SeqCst) >= 2);
-    let saved = status_manager
+    let saved = status_store
         .storage
         .read()
         .get("sync_complete_callback")
@@ -1137,45 +1132,14 @@ async fn test_on_sync_complete_callback_failure_does_not_rerun_sync_range() -> a
 }
 
 #[tokio::test]
-async fn test_missing_persisted_height_uses_handler_initial_height() -> anyhow::Result<()> {
+async fn test_missing_persisted_height_uses_and_stores_configured_initial_height() -> anyhow::Result<()> {
     init_test_runtime()?;
     let initializer: Initiator = TestInitiator::new("test_init_initial_height", 2).into();
-    let status_manager = Arc::new(TestStatusManager::new());
+    let status_store = Arc::new(TestStatusStore::new(7));
     let sync_id = "sync_initial_height".to_string();
+    let sync = TestSync::new(&sync_id, 0).into();
 
-    struct TestInitialHeightSync {
-        id: String,
-        calls: Arc<AtomicUsize>,
-    }
-
-    #[async_trait::async_trait]
-    impl SyncHandler for TestInitialHeightSync {
-        fn id(&self) -> &str {
-            &self.id
-        }
-
-        fn initial_synced_height(&self) -> SyncHeight {
-            7
-        }
-
-        async fn sync_range(&mut self, _from: SyncHeight, to: SyncHeight) -> SyncCoreResult<Option<SyncHeight>> {
-            self.calls.fetch_add(1, Ordering::SeqCst);
-            Ok(Some(to))
-        }
-
-        fn retry_delay(&self) -> Duration {
-            Duration::from_millis(20)
-        }
-    }
-
-    let sync_calls = Arc::new(AtomicUsize::new(0));
-    let sync = TestInitialHeightSync {
-        id: sync_id.clone(),
-        calls: sync_calls.clone(),
-    }
-    .into();
-
-    let engine = SyncEngine::builder(status_manager.clone())
+    let engine = SyncEngine::builder(status_store.clone())
         .add_synchronizer(sync, &[&initializer])?
         .add_initiator(initializer)?
         .build();
@@ -1183,10 +1147,41 @@ async fn test_missing_persisted_height_uses_handler_initial_height() -> anyhow::
     let run_handle = engine.run();
     shutdown_engine_after(run_handle, Duration::from_millis(250)).await?;
 
-    let statuses = status_manager.storage.read().get(&sync_id).cloned().unwrap_or_default();
+    let statuses = status_store.storage.read().get(&sync_id).cloned().unwrap_or_default();
     assert!(!statuses.is_empty());
     assert_eq!(8, statuses[0]);
-    assert!(sync_calls.load(Ordering::SeqCst) > 0);
+    assert_eq!(Some(7), status_store.load_synced_height(INITIAL_SYNC_ID).await?);
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_persisted_sync_and_initial_heights_take_precedence_over_config() -> anyhow::Result<()> {
+    let status_store = TestStatusStore::new(99);
+    status_store.save_synced_height(INITIAL_SYNC_ID, 7).await?;
+
+    assert_eq!(7, status_store.load_synced_or_initial("missing_sync").await?);
+
+    status_store.save_synced_height("persisted_sync", 11).await?;
+    assert_eq!(11, status_store.load_synced_or_initial("persisted_sync").await?);
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_initial_height_save_failure_is_retried() -> anyhow::Result<()> {
+    init_test_runtime()?;
+    let initiator: Initiator = TestInitiator::new("initial_save_retry_trigger", 2).into();
+    let status_store = Arc::new(TestStatusStore::new(3).with_initial_save_failures(1));
+    let sync: Synchronizer = TestSync::new("initial_save_retry_sync", 0).into();
+
+    let engine = SyncEngine::builder(status_store.clone())
+        .add_synchronizer(sync, &[&initiator])?
+        .add_initiator(initiator)?
+        .build();
+    shutdown_engine_after(engine.run(), Duration::from_millis(500)).await?;
+
+    assert_eq!(0, status_store.initial_save_failures.load(Ordering::SeqCst));
+    assert_eq!(Some(3), status_store.load_synced_height(INITIAL_SYNC_ID).await?);
+    assert!(status_store.load_synced_height("initial_save_retry_sync").await?.is_some());
     Ok(())
 }
 
@@ -1198,7 +1193,7 @@ async fn test_shutdown_completes_while_custom_trigger_sender_is_alive() -> anyho
     let trigger = TestTrigger(trigger_rx);
     let sync: Synchronizer = TestSync::new("live_custom_trigger", 0).into();
     let mut sync_progress = sync.receiver();
-    let engine = SyncEngine::builder(Arc::new(TestStatusManager::new()))
+    let engine = SyncEngine::builder(Arc::new(TestStatusStore::new(0)))
         .add_synchronizer(sync, &[&trigger])?
         .build();
 
@@ -1218,7 +1213,7 @@ async fn test_wait_returns_when_custom_trigger_closes() -> anyhow::Result<()> {
     let trigger = TestTrigger(trigger_rx);
     let sync: Synchronizer = TestSync::new("closing_custom_trigger", 0).into();
     let mut sync_progress = sync.receiver();
-    let engine = SyncEngine::builder(Arc::new(TestStatusManager::new()))
+    let engine = SyncEngine::builder(Arc::new(TestStatusStore::new(0)))
         .add_synchronizer(sync, &[&trigger])?
         .build();
 
@@ -1261,7 +1256,7 @@ async fn test_wait_returns_task_join_failure() -> anyhow::Result<()> {
 
     let pending: Initiator = PendingInitiator.into();
     let panicking: Initiator = PanickingInitiator.into();
-    let engine = SyncEngine::builder(Arc::new(TestStatusManager::new()))
+    let engine = SyncEngine::builder(Arc::new(TestStatusStore::new(0)))
         .add_initiator(pending)?
         .add_initiator(panicking)?
         .build();
@@ -1309,7 +1304,7 @@ async fn test_shutdown_aborts_a_stuck_consumer_after_timeout() -> anyhow::Result
 
     let started = Arc::new(Notify::new());
     let dropped = Arc::new(AtomicBool::new(false));
-    let engine = SyncEngine::builder(Arc::new(TestStatusManager::new()))
+    let engine = SyncEngine::builder(Arc::new(TestStatusStore::new(0)))
         .with_shutdown_timeout(Duration::from_millis(20))?
         .add_initiator(
             PendingInitiator {

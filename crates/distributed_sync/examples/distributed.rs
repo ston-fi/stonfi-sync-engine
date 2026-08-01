@@ -39,10 +39,6 @@ impl DistributedSyncHandler for RangeHandler {
         "range"
     }
 
-    fn initial_synced_height(&self) -> SyncHeight {
-        0
-    }
-
     async fn create_tasks(&self, from: SyncHeight, to: SyncHeight) -> SyncCoreResult<Option<TaskBatch<Self::Task>>> {
         Ok(Some(TaskBatch::new(to, vec![RangeTask { from, to }])))
     }
@@ -77,7 +73,7 @@ async fn main() -> anyhow::Result<()> {
     let worker_handle = worker.run();
 
     let initiator = Initiator::new(OneHeightInitiator);
-    let status_store = Arc::new(MemStatusStore::new());
+    let status_store = Arc::new(MemStatusStore::new(0));
     let engine = SyncEngine::builder(status_store.clone())
         .add_synchronizer(Synchronizer::new(distributed), &[&initiator])?
         .add_initiator(initiator)?

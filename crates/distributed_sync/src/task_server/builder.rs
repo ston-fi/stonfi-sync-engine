@@ -2,7 +2,7 @@
 use super::PollObserver;
 use super::{DEFAULT_SHUTDOWN_TIMEOUT, TaskServer};
 use crate::coordinator::Coordinator;
-use crate::timeout_deadline;
+use crate::utils::validate_timeout;
 use std::net::SocketAddr;
 #[cfg(test)]
 use std::sync::Arc;
@@ -55,7 +55,7 @@ impl Builder {
         let listen_address = self
             .listen_address
             .ok_or_else(|| SyncCoreError::invalid_args("task server listen address is required"))?;
-        let _ = timeout_deadline(self.shutdown_timeout, "task server shutdown timeout")?;
+        validate_timeout(self.shutdown_timeout, "task server shutdown timeout")?;
         let listener = TcpListener::bind(listen_address).await.map_err(SyncCoreError::net)?;
         let local_address = listener.local_addr().map_err(SyncCoreError::net)?;
         Ok(TaskServer {

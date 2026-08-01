@@ -32,8 +32,10 @@ demonstrated consumer requirement.
 Create one `Arc<Handler>`, pass it to
 `DistributedSynchronizer::new(handler.clone(), coordinator)`, and register it
 with `Worker::builder(endpoint).add_handler(handler)`. A handler ID must be
-stable, non-empty, free of leading/trailing whitespace, and identical in every
-coordinator and worker binary.
+stable and identical in every coordinator and worker binary. `SyncEngine`'s
+builder owns ID validation when the adapter is registered; distributed
+constructors do not duplicate it. Initial-height configuration belongs to the
+core `SyncStatusStore`, not to distributed handlers.
 
 Public fallible APIs return `stonfi_sync_core::errors::SyncCoreResult`. Keep
 transport-generated protobuf types private. `TaskBatch` owns ordered tasks and

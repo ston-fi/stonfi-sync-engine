@@ -98,10 +98,6 @@ impl DistributedSyncHandler for TestHandler {
         self.id
     }
 
-    fn initial_synced_height(&self) -> SyncHeight {
-        0
-    }
-
     async fn create_tasks(&self, _from: SyncHeight, to: SyncHeight) -> SyncCoreResult<Option<TaskBatch<Self::Task>>> {
         tokio::time::sleep(self.create_delay).await;
         Ok(Some(TaskBatch::new(to, vec![TestTask(1), TestTask(2), TestTask(3)])))
@@ -165,10 +161,6 @@ impl DistributedSyncHandler for EmptyBatchHandler {
         "empty-batch"
     }
 
-    fn initial_synced_height(&self) -> SyncHeight {
-        0
-    }
-
     async fn create_tasks(&self, _from: SyncHeight, to: SyncHeight) -> SyncCoreResult<Option<TaskBatch<Self::Task>>> {
         Ok(Some(TaskBatch::new(to, Vec::new())))
     }
@@ -195,10 +187,6 @@ impl DistributedSyncHandler for PanickingHandler {
 
     fn id(&self) -> &str {
         "panicking-handler"
-    }
-
-    fn initial_synced_height(&self) -> SyncHeight {
-        0
     }
 
     async fn create_tasks(&self, _from: SyncHeight, to: SyncHeight) -> SyncCoreResult<Option<TaskBatch<Self::Task>>> {
@@ -231,7 +219,7 @@ async fn test_sync_engine_runs_through_server_and_worker() -> anyhow::Result<()>
     let handler = Arc::new(TestHandler::new("engine-end-to-end", false, Duration::from_millis(1)));
     let (distributed, worker, server) = setup(handler.clone(), 2).await?;
     let initiator = Initiator::new(OneHeightInitiator);
-    let status_store = Arc::new(MemStatusStore::new());
+    let status_store = Arc::new(MemStatusStore::new(0));
     let engine = SyncEngine::builder(status_store.clone())
         .add_synchronizer(Synchronizer::new(distributed), &[&initiator])?
         .add_initiator(initiator)?
@@ -531,8 +519,6 @@ fn test_registration_and_configuration_validation() -> anyhow::Result<()> {
             .is_err()
     );
 
-    let blank = Arc::new(TestHandler::new(" ", false, Duration::from_millis(1)));
-    assert!(DistributedSynchronizer::new(blank, Coordinator::new()).is_err());
     let zero_timeout =
         Arc::new(TestHandler::new("zero-timeout", false, Duration::from_millis(1)).with_sync_timeout(Duration::ZERO));
     assert!(DistributedSynchronizer::new(zero_timeout, Coordinator::new()).is_err());

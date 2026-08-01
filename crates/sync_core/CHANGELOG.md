@@ -4,6 +4,10 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+- Move the initial synced-height fallback from `SyncHandler` into
+  `SyncStatusStore`. Stores now provide a configured fallback and
+  `load_synced_or_initial`, persist it under the reserved `INITIAL_SYNC_ID`,
+  and prefer existing per-sync or initial state.
 - Rename `MemStatusManager` to `MemStatusStore` and its module to
   `mem_status_store`.
 - Emit diagnostics through `tracing` without embedded ANSI escape sequences.

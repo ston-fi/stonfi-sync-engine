@@ -1,7 +1,7 @@
 use super::{Inner, Worker};
 use crate::handler::DistributedSyncHandler;
-use crate::synchronizer::{ErasedHandler, validate_handler_id};
-use crate::{timeout_deadline, timeout_millis};
+use crate::synchronizer::ErasedHandler;
+use crate::utils::{validate_timeout, validate_timeout_millis};
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::num::NonZeroUsize;
@@ -85,13 +85,12 @@ impl Builder {
     ///
     /// # Errors
     ///
-    /// Returns an error when the handler ID is invalid or already registered.
+    /// Returns an error when the handler ID is already registered.
     pub fn add_handler<H>(mut self, handler: Arc<H>) -> SyncCoreResult<Self>
     where
         H: DistributedSyncHandler,
     {
         let handler_id = handler.id().to_owned();
-        validate_handler_id(&handler_id)?;
         match self.handlers.entry(handler_id.clone()) {
             Entry::Vacant(entry) => {
                 entry.insert(handler);
@@ -119,9 +118,9 @@ impl Builder {
                 "worker endpoint must use the trusted-network http scheme",
             ));
         }
-        let _ = timeout_millis(self.polling_timeout, "worker polling timeout")?;
-        let _ = timeout_deadline(self.reconnect_delay, "worker reconnect delay")?;
-        let _ = timeout_deadline(self.shutdown_timeout, "worker shutdown timeout")?;
+        validate_timeout_millis(self.polling_timeout, "worker polling timeout")?;
+        validate_timeout(self.reconnect_delay, "worker reconnect delay")?;
+        validate_timeout(self.shutdown_timeout, "worker shutdown timeout")?;
         let parallelism = match self.parallelism {
             Some(parallelism) => parallelism,
             None => std::thread::available_parallelism().map_err(SyncCoreError::system)?,

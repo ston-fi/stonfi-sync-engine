@@ -4,6 +4,8 @@ All notable changes to `stonfi_distributed_sync` are documented here.
 
 ## Unreleased
 
+- Remove initial-height configuration from `DistributedSyncHandler`; the core
+  `SyncStatusStore` now owns and persists the engine-wide fallback.
 - Emit diagnostics through `tracing` while preserving message text and levels.
 - Use the core `u64` `SyncHeight` domain and the `retry_delay`, batch-size, and
   rewind handler controls. `RangeTask` serializes the full height range.

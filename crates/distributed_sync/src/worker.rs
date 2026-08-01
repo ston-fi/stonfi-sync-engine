@@ -5,7 +5,7 @@ mod metrics;
 use crate::proto::complete_request::Outcome;
 use crate::proto::{CompleteRequest, TaskAssignment};
 use crate::synchronizer::ErasedHandler;
-use crate::timeout_deadline;
+use crate::utils::timeout_deadline;
 use builder::Builder;
 use futures::stream::{FuturesUnordered, StreamExt};
 use grpc_client::GrpcClient;
@@ -354,10 +354,6 @@ mod tests {
 
         fn id(&self) -> &str {
             self.id
-        }
-
-        fn initial_synced_height(&self) -> SyncHeight {
-            0
         }
 
         async fn create_tasks(

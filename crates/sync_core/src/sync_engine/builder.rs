@@ -4,7 +4,7 @@ use crate::sync_engine::initiator::Initiator;
 use crate::sync_engine::multi_receiver::MultiReceiver;
 use crate::sync_engine::synchronizer::Synchronizer;
 use crate::sync_engine::traits::SyncTrigger;
-use crate::sync_engine::{SyncCallback, SyncEngine, SyncHeight, SyncStatusStore};
+use crate::sync_engine::{INITIAL_SYNC_ID, SyncCallback, SyncEngine, SyncHeight, SyncStatusStore};
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -13,7 +13,7 @@ const DEFAULT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Builds a [`SyncEngine`] with initiators, synchronizers, and callbacks.
 pub struct Builder {
-    status_manager: Arc<dyn SyncStatusStore>,
+    status_store: Arc<dyn SyncStatusStore>,
     log_progress: fn(SyncHeight, SyncHeight) -> bool,
     initiators: Vec<Initiator>,
     synchronizers: Vec<(Synchronizer, MultiReceiver)>,
@@ -23,9 +23,9 @@ pub struct Builder {
 }
 
 impl Builder {
-    pub(super) fn new(status_manager: Arc<dyn SyncStatusStore>) -> Self {
+    pub(super) fn new(status_store: Arc<dyn SyncStatusStore>) -> Self {
         Self {
-            status_manager,
+            status_store,
             log_progress: |_, _| true,
             initiators: Default::default(),
             synchronizers: Default::default(),
@@ -39,8 +39,9 @@ impl Builder {
     ///
     /// # Errors
     ///
-    /// Returns an error when the initiator ID is empty, has edge whitespace, or
-    /// duplicates another registered entity ID.
+    /// Returns an error when the initiator ID is empty, has edge whitespace,
+    /// equals the reserved `INITIAL_SYNC_ID`, or duplicates another registered
+    /// entity ID.
     pub fn add_initiator(mut self, initiator: Initiator) -> SyncCoreResult<Self> {
         let initiator_id = initiator.id().to_owned();
         validate_sync_id(&initiator_id)?;
@@ -57,8 +58,9 @@ impl Builder {
     ///
     /// # Errors
     ///
-    /// Returns an error for an empty or edge-whitespace ID, missing triggers,
-    /// duplicate IDs, or invalid range limits.
+    /// Returns an error for an empty, edge-whitespace, or reserved
+    /// `INITIAL_SYNC_ID`, missing triggers, duplicate IDs, or invalid range
+    /// limits.
     pub fn add_synchronizer(mut self, sync: Synchronizer, triggers: &[&dyn SyncTrigger]) -> SyncCoreResult<Self> {
         let sync_id = sync.handler.id().to_owned();
         validate_sync_id(&sync_id)?;
@@ -122,7 +124,7 @@ impl Builder {
     /// Finalizes the builder and returns the engine.
     pub fn build(self) -> SyncEngine {
         SyncEngine {
-            status_manager: self.status_manager,
+            status_store: self.status_store,
             callbacks: Arc::new(self.callbacks),
             log_progress: self.log_progress,
             initiators: self.initiators,
@@ -140,6 +142,11 @@ fn validate_sync_id(sync_id: &str) -> SyncCoreResult<()> {
         return Err(SyncCoreError::invalid_args(
             "sync ID must not have leading or trailing whitespace",
         ));
+    }
+    if sync_id == INITIAL_SYNC_ID {
+        return Err(SyncCoreError::invalid_args(format!(
+            "sync ID {INITIAL_SYNC_ID} is reserved for the initial synced height"
+        )));
     }
     Ok(())
 }

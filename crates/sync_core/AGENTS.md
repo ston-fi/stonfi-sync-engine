@@ -12,7 +12,8 @@ ordered heights:
 
 - `SyncInitiator` discovers upstream progress.
 - `SyncHandler` processes bounded inclusive ranges.
-- `SyncStatusStore` persists committed progress.
+- `SyncStatusStore` persists committed progress and owns the configured initial
+  height fallback.
 - `SyncTrigger` connects initiators and synchronizers into a dependency graph.
 - `SyncCallback` observes lifecycle events.
 
@@ -69,8 +70,14 @@ engine or status-store height domain.
 ## Invariants and pitfalls
 
 - Every initiator and synchronizer ID must be unique within one engine.
+- `INITIAL_SYNC_ID` (`"INITIAL"`) is reserved for the status store's durable
+  engine-wide baseline and must never identify an initiator, synchronizer, or
+  dependency-graph node.
 - Only one active engine may write a given sync ID. The status-store API is
-  not compare-and-set storage.
+  not compare-and-set storage; this also applies to `INITIAL_SYNC_ID`.
+- `SyncStatusStore::load_synced_or_initial` prefers per-sync state, then the
+  persisted `INITIAL` state, and only then stores and returns the configured
+  fallback.
 - `SyncHeight` is `u64`; height `0` remains the initial no-progress sentinel.
 - Batch sizes are positive, fit in `SyncHeight`, and satisfy `min <= max`.
 - `sync_range(from, to)` processes an inclusive range and may report only a
