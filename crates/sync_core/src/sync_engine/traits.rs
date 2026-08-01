@@ -139,9 +139,11 @@ pub trait SyncCallback: Send + Sync + 'static {
     /// Called when `HeightLoader::latest_height()` returns an error.
     /// `height` is the last height passed to it as `after`.
     async fn on_height_load_error(&self, _component_id: &str, _height: SyncHeight) -> SyncCoreResult<()> { Ok(()) }
-    /// Called after a height loader returns a candidate next height.
+    /// Called after every successful height load, including the initial
+    /// `latest_height(0)` result.
     async fn on_height_loaded(&self, _component_id: &str, _prev_height: SyncHeight, _loaded_height: SyncHeight) -> SyncCoreResult<()> { Ok(()) }
-    /// Called after a height provider publishes a new height to its subscribers.
+    /// Called after every nonzero height publication, including initial
+    /// progress published with `prev_height == 0`.
     async fn on_height_published(&self, _component_id: &str, _prev_height: SyncHeight, _published_height: SyncHeight) -> SyncCoreResult<()> { Ok(()) }
     /// Called before a synchronizer starts processing the inclusive range
     /// `[from, to]`.

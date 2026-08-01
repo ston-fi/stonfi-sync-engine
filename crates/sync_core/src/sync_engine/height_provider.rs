@@ -69,10 +69,24 @@ impl HeightProvider {
             }
         };
         SyncEngineMetrics::update_loaded_height(&id, cur_height);
+        if !ctx.callbacks
+            .on_height_loaded_loop(&id, 0, cur_height, self.height_loader.retry_delay())
+            .await
+        {
+            return;
+        }
 
         tracing::info!("[{log_prefix}] started with latest_height: {cur_height}");
-        if cur_height > 0 && !self.publish_height(&log_prefix, cur_height) {
-            return;
+        if cur_height > 0 {
+            if !self.publish_height(&log_prefix, cur_height) {
+                return;
+            }
+            if !ctx.callbacks
+                .on_height_published_loop(&id, 0, cur_height, self.height_loader.retry_delay())
+                .await
+            {
+                return;
+            }
         }
         loop {
             if ctx.cancellation.is_cancelled() {

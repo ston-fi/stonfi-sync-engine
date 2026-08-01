@@ -122,6 +122,9 @@ provide compare-and-set coordination.
   idempotent because a later callback failure can replay earlier callbacks.
   Delivery is not persisted or guaranteed across shutdown, process failure, or
   restart.
+- Initial source discovery emits `on_height_loaded` with previous height `0`.
+  A nonzero initial height is then published and emits `on_height_published`
+  with the same previous height.
 - Returning `Ok(None)` from [`SyncHandler::sync_range`] defers that range until
   an upstream progress provider advances again.
 - `allow_rewind()` permits a handler to publish a lower height. Upstream

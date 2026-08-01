@@ -95,6 +95,9 @@ engine or status-store height domain.
 - Callback failures are retried only while the engine is active. Callbacks must
   be idempotent because earlier callbacks may replay; delivery is not durable
   across shutdown or restart.
+- Initial source discovery invokes `on_height_loaded`; a nonzero initial value
+  is published and then invokes `on_height_published`, both from previous
+  height `0`.
 - An upstream progress decrease does not rewind dependants or cancel progress
   selected by an active wait. Each handler controls its own rewind behavior
   through `allow_rewind()`; subsequent waits use current provider values.

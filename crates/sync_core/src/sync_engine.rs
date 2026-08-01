@@ -1,5 +1,13 @@
 #[cfg(test)]
-mod _tests;
+mod _test_builder;
+#[cfg(test)]
+mod _test_height_provider;
+#[cfg(test)]
+mod _test_lifecycle;
+#[cfg(test)]
+mod _test_support;
+#[cfg(test)]
+mod _test_synchronizer;
 mod builder;
 mod callbacks;
 mod height_provider;
