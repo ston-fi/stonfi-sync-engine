@@ -31,7 +31,8 @@ external coordinates into the engine's height domain.
 ## Installation
 
 The crate has not published a remote Git release yet and is not published to
-crates.io. During development, pin it to a published workspace commit:
+crates.io. During development, pin it to a commit SHA that is reachable from
+the remote:
 
 ```toml
 [dependencies]
@@ -138,6 +139,12 @@ and extension traits are under [`sync_engine`]. The main types are [`SyncEngine`
 Each progress subscription returns a [`ProgressReceiver`].
 Pass dependencies by reference to `Builder::add_synchronizer`; the builder
 subscribes to each [`ProgressProvider`] before its owner is registered.
+Every referenced engine-owned provider must subsequently be registered with
+the same builder. If it is dropped instead, its progress channel closes and the
+dependant synchronizer stops. Custom providers must likewise keep their sender
+alive for as long as the dependant should run. Keep the dependency graph
+acyclic; the builder does not discover or reject cycles, which can wait for one
+another indefinitely.
 
 Height providers and handlers are owned by one engine task and need only implement
 `Send + 'static`. `SyncHandler::sync_range` receives `&mut self`, so stateful
@@ -152,8 +159,8 @@ handlers only process ranges.
 
 ## Metrics
 
-Engine metrics use the default Prometheus registry and are registered with
-`stonfi_metrics` automatically. Applications must initialize the registered
+Engine metrics use the default Prometheus registry. The crate declares its
+collectors with `stonfi_metrics`; applications must initialize all declared
 collectors during startup before running the engine:
 
 ```rust

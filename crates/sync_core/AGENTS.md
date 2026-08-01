@@ -19,9 +19,10 @@ ordered heights:
 - `SyncCallback` observes lifecycle events.
 
 The crate does not provide distributed locking, multi-writer conflict
-resolution, storage, a Tokio runtime, or distributed task transport. Those
-transport concerns belong to the sibling `crates/distributed_sync` package; do
-not add gRPC, protobuf, server, or worker dependencies to the core package.
+resolution, a durable storage implementation, a Tokio runtime, or distributed
+task transport. Those transport concerns belong to the sibling
+`crates/distributed_sync` package; do not add gRPC, protobuf, server, or worker
+dependencies to the core package.
 
 ## Public API and ownership
 
@@ -42,9 +43,11 @@ stores and callbacks are shared across tasks and require `Send + Sync + 'static`
 Prefer `SyncEngine::builder`, add synchronizers with references to their
 upstream progress providers, add the corresponding height providers, then
 build and run. The builder subscribes to progress before retaining single
-ownership of height providers and synchronizers. `SyncEngine::run` consumes
-the engine definition and returns the runtime owner. Use `RunHandle::shutdown`
-for bounded awaited shutdown; dropping the handle only signals best-effort
+ownership of height providers and synchronizers. It cannot verify that a
+referenced provider is later registered: dropping an unregistered provider
+closes its channel and stops the dependant. `SyncEngine::run` consumes the
+engine definition and returns the runtime owner. Use `RunHandle::shutdown` for
+bounded awaited shutdown; dropping the handle only signals best-effort
 shutdown. Use `RunHandle::wait` only when every task can finish naturally.
 
 Consumers use the Git dependency documented in `README.md`. The crate requires
@@ -53,8 +56,8 @@ a running Tokio runtime before `SyncEngine::run` is called and returns typed
 Library diagnostics use `tracing` without embedded ANSI escapes; applications
 own subscriber configuration. Do not add terminal styling to library messages.
 `SyncEngine::builder` is infallible because it only stores the status store;
-keep `Builder::add_synchronizer` and `Builder::add_height_provider` fallible because
-validation happens when each entity is registered.
+keep `Builder::add_synchronizer` and `Builder::add_height_provider` fallible
+because validation happens when each entity is registered.
 
 Engine metrics are private global collectors registered through
 `stonfi_metrics::register_metrics!`. Applications call
@@ -74,6 +77,8 @@ engine or status-store height domain.
 
 - Every height provider and synchronizer component ID must be unique within one
   engine.
+- Dependency graphs must be acyclic. The builder subscribes to providers but
+  does not perform graph discovery or cycle detection.
 - `INITIAL_SYNC_ID` (`"INITIAL"`) is reserved for the status store's durable
   engine-wide baseline and must never identify a height provider, synchronizer,
   or dependency-graph entity.
@@ -105,10 +110,11 @@ engine or status-store height domain.
 ## Changing the crate
 
 For public API, behavior, feature, workspace, dependency, or package-surface
-changes, review and update the README, rustdoc, example, tests, this guide,
-changelog, CI, and package include rules in the same change, or record why an
-artifact is unaffected. Add deterministic tests for owned behavior and failure
-modes, not for third-party behavior or metric registration.
+changes, review and update the README, rustdoc, example, tests, this guide, CI,
+and package include rules in the same change, or record why an artifact is
+unaffected. Do not manually populate `CHANGELOG.md`; release-plz release PRs own
+generated entries. Add deterministic tests for owned behavior and failure modes,
+not for third-party behavior or metric registration.
 
 Use `Result`-returning Rust tests with `?` whenever a called operation is
 fallible. Keep changes narrow and avoid refactoring the synchronizer state

@@ -19,7 +19,7 @@ independent dependency and release boundary.
 ## Using the core package
 
 The workspace has not published a remote Git release yet. During development,
-pin the package to a published commit:
+pin the package to a commit SHA that is reachable from the remote:
 
 ```toml
 [dependencies]
