@@ -58,7 +58,8 @@ cargo package --list --locked -p stonfi_distributed_sync
 ```
 
 GitHub CI owns these gates. Packages are currently Git-distributed with
-`publish = false`. Release-plz runs only after the quality and MSRV jobs pass
-on `main`, and creates Git tags and GitHub Releases without publishing to
-crates.io. Do not add registry credentials, enable crates.io publishing, or
-manually change versions and tags unless a release task explicitly requires it.
+`publish = false`. Release-plz runs only after the quality, MSRV, and external
+Git-consumer jobs pass on `main`, and creates Git tags and GitHub Releases
+without publishing to crates.io. Do not add registry credentials, enable
+crates.io publishing, or manually change versions and tags unless a release
+task explicitly requires it.

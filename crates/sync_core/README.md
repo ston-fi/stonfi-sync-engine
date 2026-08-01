@@ -26,12 +26,12 @@ infrastructure.
 
 ## Installation
 
-The initial release is distributed from GitHub and is not published to
-crates.io:
+The crate has not published a remote Git release yet and is not published to
+crates.io. During development, pin it to a published workspace commit:
 
 ```toml
 [dependencies]
-stonfi_sync_core = { git = "https://github.com/ston-fi/stonfi-sync-engine", tag = "v0.0.1" }
+stonfi_sync_core = { git = "https://github.com/ston-fi/stonfi-sync-engine", rev = "<published-commit>" }
 stonfi_metrics = { version = "0.0.1", git = "https://github.com/ston-fi/stonfi-metrics", rev = "v0.0.1" }
 ```
 
@@ -81,14 +81,20 @@ where
 
 - [`SyncEngine::run`] consumes the engine definition, so it cannot be started
   twice.
-- [`RunHandle::shutdown`] signals cooperative shutdown and waits for every
-  spawned task. Dropping the handle signals best-effort shutdown without
-  waiting.
+- [`RunHandle::shutdown`] signals cooperative shutdown and waits up to the
+  builder's configured shutdown timeout. It aborts remaining tasks and returns
+  an error when that timeout expires. Dropping the handle signals best-effort
+  shutdown without waiting.
+- Shutdown defaults to 30 seconds. Use [`Builder::with_shutdown_timeout`] to
+  set a service-specific bound.
+- When graceful shutdown exceeds that bound, the engine requests Tokio task
+  abortion and returns without waiting beyond it. Tokio applies abortion when a
+  task next yields; consumer code that never yields cannot be preempted.
 - [`RunHandle::wait`] waits for natural task completion without requesting
   shutdown. Polling initiators normally require `shutdown()` instead.
 - Engine-owned trigger waits and retry sleeps observe shutdown promptly. An
-  in-progress consumer future is not preempted and must return before its task
-  can stop.
+  in-progress consumer future is cooperative until the shutdown timeout, after
+  which its engine task is aborted.
 - Both `shutdown()` and `wait()` report task panics and cancellations. A task
   failure cancels and aborts the remaining engine tasks so failure reporting
   cannot be hidden behind a consumer future that never returns.
@@ -117,6 +123,8 @@ extension traits are under [`sync_engine`]. The main types are [`SyncEngine`],
 [`Builder`], [`Initiator`], [`Synchronizer`], [`RunHandle`], and
 [`MemStatusManager`]. Consumer-owned extension points are [`SyncInitiator`],
 [`SyncHandler`], [`SyncStatusManager`], [`SyncTrigger`], and [`SyncCallback`].
+Pass initiators and synchronizers by reference to `Builder::add_sync`; the
+builder clones their progress receivers before the owners are moved into it.
 
 Initiators and handlers are owned by one engine task and need only implement
 `Send + 'static`. `SyncHandler::sync_range` receives `&mut self`, so stateful
@@ -124,7 +132,7 @@ implementations can update their own fields without internal locking. Status
 managers and callbacks are shared between tasks and therefore remain
 `Send + Sync + 'static`.
 
-### Migrating from `v0.0.1`
+### Migrating from the unpublished `v0.0.1` baseline
 
 Root-level re-exports and the `SyncID` alias have been removed. Import public
 items from their modules, keep owned IDs as `String` where needed, and return or
@@ -166,6 +174,7 @@ cargo package --list --locked -p stonfi_sync_core
 ```
 
 [`Builder`]: crate::sync_engine::Builder
+[`Builder::with_shutdown_timeout`]: crate::sync_engine::Builder::with_shutdown_timeout
 [`Initiator`]: crate::sync_engine::Initiator
 [`MemStatusManager`]: crate::mem_status_manager::MemStatusManager
 [`RunHandle`]: crate::sync_engine::RunHandle

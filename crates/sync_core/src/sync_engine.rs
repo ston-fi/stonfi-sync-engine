@@ -34,6 +34,7 @@ pub struct SyncEngine {
     log_progress: fn(SyncHeight, SyncHeight) -> bool,
     initiators: Vec<Initiator>,
     synchronizers: Vec<(Synchronizer, MultiReceiver)>,
+    shutdown_timeout: Duration,
 }
 
 impl SyncEngine {
@@ -47,7 +48,7 @@ impl SyncEngine {
     /// synchronizer on the current Tokio runtime.
     ///
     /// The returned [`RunHandle`] owns the running tasks. Use
-    /// [`RunHandle::shutdown`] for awaited cooperative shutdown or
+    /// [`RunHandle::shutdown`] for bounded awaited shutdown or
     /// [`RunHandle::wait`] to wait for the tasks to finish naturally.
     ///
     /// # Panics
@@ -62,9 +63,10 @@ impl SyncEngine {
             log_progress,
             initiators,
             synchronizers,
+            shutdown_timeout,
         } = self;
         let cancellation = CancellationToken::new();
-        let mut tasks = Vec::new();
+        let tasks = FuturesUnordered::new();
 
         for initiator in initiators {
             let ctx = InitiatorCtx {
@@ -85,7 +87,11 @@ impl SyncEngine {
             tasks.push(tokio::spawn(sync.run(ctx)));
         }
 
-        RunHandle { cancellation, tasks }
+        RunHandle {
+            cancellation,
+            tasks,
+            shutdown_timeout,
+        }
     }
 }
 
@@ -96,22 +102,38 @@ impl SyncEngine {
 #[must_use = "dropping the run handle immediately requests engine shutdown"]
 pub struct RunHandle {
     cancellation: CancellationToken,
-    tasks: Vec<JoinHandle<()>>,
+    tasks: FuturesUnordered<JoinHandle<()>>,
+    shutdown_timeout: Duration,
 }
 
 impl RunHandle {
-    /// Signals cooperative shutdown and waits for all spawned tasks to finish.
+    /// Signals cooperative shutdown and waits up to the configured timeout for
+    /// all spawned tasks to finish.
     ///
-    /// Engine-owned trigger waits and retry sleeps are interrupted. An active
-    /// consumer-provided future is not preempted and must return before its task
-    /// can observe shutdown.
+    /// Engine-owned trigger waits and retry sleeps are interrupted. Active
+    /// consumer-provided futures remain cooperative until the configured
+    /// shutdown timeout, after which task abortion is requested and this method
+    /// returns without another unbounded join. Tokio applies abortion when a
+    /// task next yields and cannot preempt consumer code that never yields.
     ///
     /// # Errors
     ///
-    /// Returns an error if a spawned task panicked or was cancelled.
+    /// Returns an error if a spawned task panicked or was cancelled, or when
+    /// shutdown exceeds the timeout. Remaining tasks are aborted on timeout.
     pub async fn shutdown(mut self) -> SyncCoreResult<()> {
         self.cancellation.cancel();
-        self.join_tasks().await
+        let shutdown_timeout = self.shutdown_timeout;
+        match tokio::time::timeout(shutdown_timeout, self.join_tasks()).await {
+            Ok(result) => result,
+            Err(_) => {
+                for task in self.tasks.iter() {
+                    task.abort();
+                }
+                Err(SyncCoreError::system(format!(
+                    "sync engine shutdown exceeded {shutdown_timeout:.3?}"
+                )))
+            },
+        }
     }
 
     /// Waits for all spawned tasks to finish without requesting shutdown.
@@ -128,13 +150,12 @@ impl RunHandle {
 
     async fn join_tasks(&mut self) -> SyncCoreResult<()> {
         let mut first_error = None;
-        let mut pending = self.tasks.drain(..).collect::<FuturesUnordered<_>>();
-        while let Some(result) = pending.next().await {
+        while let Some(result) = self.tasks.next().await {
             if let Err(error) = result {
                 if first_error.is_none() {
                     first_error = Some(SyncCoreError::system(format!("sync engine task failed to join: {error}")));
                     self.cancellation.cancel();
-                    for task in pending.iter() {
+                    for task in self.tasks.iter() {
                         task.abort();
                     }
                 } else {

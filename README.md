@@ -8,7 +8,7 @@ own package under `crates/`.
 
 | Package | Path | Status | Responsibility |
 | --- | --- | --- | --- |
-| [`stonfi_sync_core`](crates/sync_core/README.md) | `crates/sync_core` | Available at `v0.0.1` | Dependency-aware synchronization of ordered heights |
+| [`stonfi_sync_core`](crates/sync_core/README.md) | `crates/sync_core` | Unreleased | Dependency-aware synchronization of ordered heights |
 | [`stonfi_distributed_sync`](crates/distributed_sync/README.md) | `crates/distributed_sync` | Unreleased | Distributed task coordination, gRPC servers, and workers |
 
 `stonfi_distributed_sync` is a separate package depending on
@@ -18,11 +18,12 @@ independent dependency and release boundary.
 
 ## Using the core package
 
-The initial release is Git-distributed and is not published to crates.io:
+The workspace has not published a remote Git release yet. During development,
+pin both packages to the same published commit:
 
 ```toml
 [dependencies]
-stonfi_sync_core = { git = "https://github.com/ston-fi/stonfi-sync-engine", tag = "v0.0.1" }
+stonfi_sync_core = { git = "https://github.com/ston-fi/stonfi-sync-engine", rev = "<published-commit>" }
 ```
 
 See the [`stonfi_sync_core` README](crates/sync_core/README.md) for its API,
@@ -33,9 +34,10 @@ trusted-network boundary, metrics, and runnable example.
 
 ## Releases
 
-Merges to `main` run release-plz only after the workspace quality and MSRV jobs
-succeed. Release-plz creates the version tag and GitHub Release in Git-only
-mode; it does not run `cargo publish` or require a crates.io token.
+Merges to `main` run release-plz only after the workspace quality, MSRV, and
+external Git-consumer jobs succeed. Release-plz creates the version tag and
+GitHub Release in Git-only mode; it does not run `cargo publish` or require a
+crates.io token.
 
 ## Workspace validation
 

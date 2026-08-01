@@ -115,8 +115,8 @@ async fn main() -> anyhow::Result<()> {
     // 2. the synchronizer that processes them
     // 3. the callback that observes the lifecycle
     //
-    // `add_sync(..., &[&initiator])` means the synchronizer should only advance
-    // when this initiator publishes a higher completed height.
+    // Passing `&initiator` makes the synchronizer depend on its progress. The
+    // builder clones the progress receiver before taking ownership below.
     let engine = SyncEngine::builder(status_manager.clone())
         .add_sync(synchronizer, &[&initiator])?
         .add_initiator(initiator)?

@@ -39,9 +39,17 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.93.0
       - run: cargo check --workspace --all-features --locked
 
+  external-consumer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@1.93.0
+      - run: bash .github/check-external-consumer.sh
+
   release:
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-    needs: [quality, msrv]
+    needs: [quality, msrv, external-consumer]
     runs-on: ubuntu-latest
     permissions:
       contents: write

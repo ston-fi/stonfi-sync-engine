@@ -64,10 +64,11 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 
 Initialize `stonfi_metrics`, create one shared `Coordinator` and handler `Arc`,
 build and run `TaskServer`, build and run `Worker`, then place
-`DistributedSynchronizer` inside the core `Synchronizer`. Retain every run
-handle and shut the core engine down before the worker and server. Keep the
-README doctest and `examples/distributed.rs` as the canonical integration
-references.
+`DistributedSynchronizer` inside the core `Synchronizer`. Pass source owners by
+reference when registering synchronizer dependencies, then move those owners
+into the builder. Retain every run handle and shut the core engine down before
+the worker and server. Keep the README doctest and `examples/distributed.rs` as
+the canonical integration references.
 
 ## Delivery, ordering, and lifecycle invariants
 

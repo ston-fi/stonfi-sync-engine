@@ -13,8 +13,12 @@ All notable changes to this project are documented in this file.
   even when an earlier task does not terminate.
 - Document at-least-once handler range delivery and the idempotency and
   cancellation requirements it places on handler effects.
+- Bound cooperative engine shutdown and abort stuck consumer tasks after the
+  configured timeout.
+- Reject empty and whitespace-padded sync IDs and support the maximum remaining
+  `u32` height range without intermediate overflow.
 
-## 0.0.1
+## 0.0.1 (unpublished baseline)
 
 - Import the dependency-aware synchronization engine into its public repository.
 - Give running engines explicit cooperative shutdown ownership through

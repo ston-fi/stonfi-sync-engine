@@ -182,7 +182,7 @@ impl Synchronizer {
         }
     }
 
-    fn calc_sync_to(&self, from: SyncHeight, to: SyncHeight) -> Option<SyncHeight> {
+    pub(super) fn calc_sync_to(&self, from: SyncHeight, to: SyncHeight) -> Option<SyncHeight> {
         if to < from {
             return None;
         }
@@ -193,7 +193,7 @@ impl Synchronizer {
             return None;
         }
         let range_size = std::cmp::min(available_range_size, max_sync_range);
-        Some(from + range_size - 1)
+        from.checked_add(range_size.checked_sub(1)?)
     }
 
     #[rustfmt::skip]

@@ -38,11 +38,13 @@ ownership is required. Initiators and handlers belong to one task and require
 stateful handlers do not need internal synchronization. Status managers and
 callbacks are shared across tasks and require `Send + Sync + 'static`.
 
-Prefer `SyncEngine::builder`, add synchronizers with explicit triggers, add the
-corresponding initiators, then build and run. `SyncEngine::run` consumes the
-engine definition and returns the runtime owner. Use `RunHandle::shutdown` for
-awaited cooperative shutdown; dropping the handle only signals best-effort
-shutdown. Use `RunHandle::wait` only when every task can finish naturally.
+Prefer `SyncEngine::builder`, add synchronizers with references to their
+triggers, add the corresponding initiators, then build and run. The builder
+clones progress receivers while retaining single ownership of initiators and
+synchronizers. `SyncEngine::run` consumes the engine definition and returns the
+runtime owner. Use `RunHandle::shutdown` for bounded awaited shutdown; dropping
+the handle only signals best-effort shutdown. Use `RunHandle::wait` only when
+every task can finish naturally.
 
 Consumers use the Git dependency documented in `README.md`. The crate requires
 a running Tokio runtime before `SyncEngine::run` is called and returns typed
@@ -117,8 +119,9 @@ cargo +1.93.0 check -p stonfi_sync_core --all-features --locked
 cargo package --list --locked -p stonfi_sync_core
 ```
 
-GitHub CI owns these validation gates. The package is Git-distributed and has
-`publish = false`. Release-plz runs only after the quality and MSRV jobs pass
-on `main`, and creates the Git tag and GitHub Release without publishing to
-crates.io. Do not add a registry token or manually change versions and tags
-unless a release task explicitly requires it.
+GitHub CI owns these validation gates. The package is intended for Git
+distribution, has no remote release yet, and has `publish = false`. Release-plz
+runs only after the quality, MSRV, and external-consumer jobs pass on `main`,
+and creates the Git tag and GitHub Release without publishing to crates.io. Do
+not add a registry token or manually change versions and tags unless a release
+task explicitly requires it.

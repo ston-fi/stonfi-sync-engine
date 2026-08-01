@@ -7,6 +7,9 @@ use crate::sync_engine::traits::SyncTrigger;
 use crate::sync_engine::{SyncCallback, SyncEngine, SyncHeight, SyncStatusManager};
 use std::collections::HashSet;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+const DEFAULT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Builds a [`SyncEngine`] with initiators, synchronizers, and callbacks.
 pub struct Builder {
@@ -16,6 +19,7 @@ pub struct Builder {
     synchronizers: Vec<(Synchronizer, MultiReceiver)>,
     callbacks: CallbackStore,
     registered_ids: HashSet<String>,
+    shutdown_timeout: Duration,
 }
 
 impl Builder {
@@ -27,6 +31,7 @@ impl Builder {
             synchronizers: Default::default(),
             callbacks: Default::default(),
             registered_ids: Default::default(),
+            shutdown_timeout: DEFAULT_SHUTDOWN_TIMEOUT,
         }
     }
 
@@ -34,9 +39,11 @@ impl Builder {
     ///
     /// # Errors
     ///
-    /// Returns an error when another registered entity has the same ID.
+    /// Returns an error when the initiator ID is empty, has edge whitespace, or
+    /// duplicates another registered entity ID.
     pub fn add_initiator(mut self, initiator: Initiator) -> SyncCoreResult<Self> {
         let initiator_id = initiator.id().to_owned();
+        validate_sync_id(&initiator_id)?;
         if !self.registered_ids.insert(initiator_id.clone()) {
             return Err(SyncCoreError::logic(format!(
                 "Sync entity with id {initiator_id} is already registered"
@@ -46,14 +53,15 @@ impl Builder {
         Ok(self)
     }
 
-    /// Registers a synchronizer and the triggers it depends on.
+    /// Registers a synchronizer and the referenced triggers it depends on.
     ///
     /// # Errors
     ///
-    /// Returns an error for missing triggers, duplicate IDs, or invalid range
-    /// limits.
+    /// Returns an error for an empty or edge-whitespace ID, missing triggers,
+    /// duplicate IDs, or invalid range limits.
     pub fn add_sync(mut self, sync: Synchronizer, triggers: &[&dyn SyncTrigger]) -> SyncCoreResult<Self> {
         let sync_id = sync.handler.id().to_owned();
+        validate_sync_id(&sync_id)?;
         let min_sync_range = sync.handler.min_sync_range();
         let max_sync_range = sync.handler.max_sync_range();
         if min_sync_range == 0
@@ -73,7 +81,7 @@ impl Builder {
             return Err(SyncCoreError::Logic(err_msg));
         }
 
-        let receivers = triggers.iter().map(|x| x.receiver()).collect();
+        let receivers = triggers.iter().map(|trigger| trigger.receiver()).collect();
         let multi_receiver = MultiReceiver::new(receivers)?;
         self.synchronizers.push((sync, multi_receiver));
         Ok(self)
@@ -95,6 +103,22 @@ impl Builder {
         self
     }
 
+    /// Sets the maximum duration for [`RunHandle::shutdown`](crate::sync_engine::RunHandle::shutdown).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when `timeout` is zero or too large for an instant.
+    pub fn with_shutdown_timeout(mut self, timeout: Duration) -> SyncCoreResult<Self> {
+        if timeout.is_zero() {
+            return Err(SyncCoreError::invalid_args("engine shutdown timeout must be positive"));
+        }
+        if Instant::now().checked_add(timeout).is_none() {
+            return Err(SyncCoreError::invalid_args("engine shutdown timeout is too large"));
+        }
+        self.shutdown_timeout = timeout;
+        Ok(self)
+    }
+
     /// Finalizes the builder and returns the engine.
     pub fn build(self) -> SyncEngine {
         SyncEngine {
@@ -103,6 +127,19 @@ impl Builder {
             log_progress: self.log_progress,
             initiators: self.initiators,
             synchronizers: self.synchronizers,
+            shutdown_timeout: self.shutdown_timeout,
         }
     }
+}
+
+fn validate_sync_id(sync_id: &str) -> SyncCoreResult<()> {
+    if sync_id.is_empty() {
+        return Err(SyncCoreError::invalid_args("sync ID must not be empty"));
+    }
+    if sync_id.trim() != sync_id {
+        return Err(SyncCoreError::invalid_args(
+            "sync ID must not have leading or trailing whitespace",
+        ));
+    }
+    Ok(())
 }

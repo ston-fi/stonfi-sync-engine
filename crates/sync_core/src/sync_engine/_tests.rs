@@ -195,7 +195,7 @@ impl SyncHandler for TestSyncRanged {
 #[tokio::test]
 async fn test_sync_respects_fixed_range_size() -> anyhow::Result<()> {
     init_test_runtime()?;
-    let initializer = TestInitiator::new("test_init1_ranged", 5).into();
+    let initializer: Initiator = TestInitiator::new("test_init1_ranged", 5).into();
     let status_manager = Arc::new(TestStatusManager::new());
 
     let sync_id = "sync_ranged".to_string();
@@ -225,7 +225,7 @@ async fn test_sync_respects_fixed_range_size() -> anyhow::Result<()> {
 #[tokio::test]
 async fn test_success_callbacks_are_invoked() -> anyhow::Result<()> {
     init_test_runtime()?;
-    let initializer = TestInitiator::new("test_init1_callback", 5).into();
+    let initializer: Initiator = TestInitiator::new("test_init1_callback", 5).into();
     let status_manager = Arc::new(TestStatusManager::new());
 
     let sync_id = "sync_callback".to_string();
@@ -360,6 +360,33 @@ async fn test_builder_rejects_invalid_sync_ranges() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[test]
+fn test_maximum_remaining_range_does_not_overflow() {
+    struct MaximumRangeSync;
+
+    #[async_trait::async_trait]
+    impl SyncHandler for MaximumRangeSync {
+        fn id(&self) -> &str {
+            "maximum_range"
+        }
+
+        fn initial_synced_height(&self) -> SyncHeight {
+            0
+        }
+
+        async fn sync_range(&mut self, _: SyncHeight, to: SyncHeight) -> SyncCoreResult<Option<SyncHeight>> {
+            Ok(Some(to))
+        }
+
+        fn max_sync_range(&self) -> usize {
+            SyncHeight::MAX as usize
+        }
+    }
+
+    let synchronizer = Synchronizer::new(MaximumRangeSync);
+    assert_eq!(synchronizer.calc_sync_to(1, SyncHeight::MAX), Some(SyncHeight::MAX));
+}
+
 struct TestSyncPartial {
     id: String,
     delay: Duration,
@@ -396,7 +423,7 @@ impl SyncHandler for TestSyncPartial {
 #[tokio::test]
 async fn test_partial_sync_propagates_real_height_to_children() -> anyhow::Result<()> {
     init_test_runtime()?;
-    let initializer = TestInitiator::new("test_init_partial", 2).into();
+    let initializer: Initiator = TestInitiator::new("test_init_partial", 2).into();
     let status_manager = Arc::new(TestStatusManager::new());
 
     let sync_a_id = "sync_parent_partial".to_string();
@@ -626,7 +653,7 @@ impl SyncCallback for TestSyncErrorCallback {
 #[tokio::test]
 async fn test_on_sync_error_callback_is_invoked() -> anyhow::Result<()> {
     init_test_runtime()?;
-    let initializer = TestInitiator::new("test_init_sync_error_callback", 2).into();
+    let initializer: Initiator = TestInitiator::new("test_init_sync_error_callback", 2).into();
     let status_manager = Arc::new(TestStatusManager::new());
     let attempts = Arc::new(AtomicUsize::new(0));
     let sync_id = "sync_error_callback".to_string();
@@ -685,7 +712,7 @@ impl SyncHandler for TestSyncInvalidFirst {
 #[tokio::test]
 async fn test_invalid_synced_height_is_retried_and_not_saved() -> anyhow::Result<()> {
     init_test_runtime()?;
-    let initializer = TestInitiator::new("test_init_invalid_height", 2).into();
+    let initializer: Initiator = TestInitiator::new("test_init_invalid_height", 2).into();
     let status_manager = Arc::new(TestStatusManager::new());
     let sync_calls = Arc::new(AtomicUsize::new(0));
     let sync_id = "sync_invalid_height".to_string();
@@ -885,7 +912,7 @@ impl SyncHandler for TestNoWrapSync {
 #[tokio::test]
 async fn test_wrapped_height_is_retried_when_allow_wrap_is_false() -> anyhow::Result<()> {
     init_test_runtime()?;
-    let initializer = TestInitiator::new("test_init_no_wrap", 2).into();
+    let initializer: Initiator = TestInitiator::new("test_init_no_wrap", 2).into();
     let status_manager = Arc::new(TestStatusManager::new());
     let sync_calls = Arc::new(AtomicUsize::new(0));
     let sync_id = "sync_no_wrap".to_string();
@@ -1076,7 +1103,7 @@ async fn test_on_sync_complete_callback_failure_does_not_rerun_sync_range() -> a
     init_test_runtime()?;
     let status_manager = Arc::new(TestStatusManager::new());
     let initiator_calls = Arc::new(AtomicUsize::new(0));
-    let initiator = TestStepInitiator::new("test_init_complete_callback", initiator_calls.clone()).into();
+    let initiator: Initiator = TestStepInitiator::new("test_init_complete_callback", initiator_calls.clone()).into();
     let sync_calls = Arc::new(AtomicUsize::new(0));
     let sync = TestCountingSync::new("sync_complete_callback", sync_calls.clone()).into();
     let callback_calls = Arc::new(AtomicUsize::new(0));
@@ -1109,7 +1136,7 @@ async fn test_on_sync_complete_callback_failure_does_not_rerun_sync_range() -> a
 #[tokio::test]
 async fn test_missing_persisted_height_uses_handler_initial_height() -> anyhow::Result<()> {
     init_test_runtime()?;
-    let initializer = TestInitiator::new("test_init_initial_height", 2).into();
+    let initializer: Initiator = TestInitiator::new("test_init_initial_height", 2).into();
     let status_manager = Arc::new(TestStatusManager::new());
     let sync_id = "sync_initial_height".to_string();
 
@@ -1244,6 +1271,66 @@ async fn test_wait_returns_task_join_failure() -> anyhow::Result<()> {
         Err(error) => return Err(anyhow::anyhow!("unexpected run error: {error}")),
         Ok(()) => return Err(anyhow::anyhow!("task panic should be returned")),
     }
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_shutdown_aborts_a_stuck_consumer_after_timeout() -> anyhow::Result<()> {
+    init_test_runtime()?;
+
+    struct PendingInitiator {
+        started: Arc<Notify>,
+        dropped: Arc<AtomicBool>,
+    }
+
+    struct DropGuard(Arc<AtomicBool>);
+
+    impl Drop for DropGuard {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl SyncInitiator for PendingInitiator {
+        fn id(&self) -> &str {
+            "pending_shutdown"
+        }
+
+        async fn last_height(&mut self, _: SyncHeight) -> SyncCoreResult<SyncHeight> {
+            let _guard = DropGuard(self.dropped.clone());
+            self.started.notify_one();
+            std::future::pending().await
+        }
+    }
+
+    let started = Arc::new(Notify::new());
+    let dropped = Arc::new(AtomicBool::new(false));
+    let engine = SyncEngine::builder(Arc::new(TestStatusManager::new()))
+        .with_shutdown_timeout(Duration::from_millis(20))?
+        .add_initiator(
+            PendingInitiator {
+                started: started.clone(),
+                dropped: dropped.clone(),
+            }
+            .into(),
+        )?
+        .build();
+
+    let run_handle = engine.run();
+    tokio::time::timeout(Duration::from_millis(250), started.notified()).await?;
+    let result = tokio::time::timeout(Duration::from_millis(250), run_handle.shutdown()).await?;
+    match result {
+        Err(SyncCoreError::System(message)) => assert!(message.contains("shutdown exceeded")),
+        Err(error) => return Err(anyhow::anyhow!("unexpected shutdown error: {error}")),
+        Ok(()) => return Err(anyhow::anyhow!("stuck consumer shutdown should time out")),
+    }
+    tokio::time::timeout(Duration::from_millis(250), async {
+        while !dropped.load(Ordering::SeqCst) {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await?;
     Ok(())
 }
 

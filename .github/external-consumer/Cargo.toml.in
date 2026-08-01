@@ -1,0 +1,10 @@
+[package]
+name = "stonfi-sync-engine-external-consumer"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+async-trait = "0.1"
+stonfi_distributed_sync = { git = "__REPOSITORY_URL__", rev = "__REVISION__" }
+stonfi_sync_core = { git = "__REPOSITORY_URL__", rev = "__REVISION__" }
