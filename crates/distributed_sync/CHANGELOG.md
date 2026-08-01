@@ -4,6 +4,17 @@ All notable changes to `stonfi_distributed_sync` are documented here.
 
 ## Unreleased
 
+## [0.0.1](https://github.com/ston-fi/stonfi-sync-engine/releases/tag/stonfi_distributed_sync-v0.0.1) - 2026-08-01
+
+### Other
+
+- rename synchronization progress API
+- move initial height to status store
+- rename in-memory status store
+- refine sync API and diagnostics
+- improve usability and shutdown safety
+- add public distributed synchronization crate
+
 - Update examples and integration coverage for the core `HeightLoader`,
   `HeightProvider`, and `ProgressProvider` API.
 - Remove initial-height configuration from `DistributedSyncHandler`; the core
