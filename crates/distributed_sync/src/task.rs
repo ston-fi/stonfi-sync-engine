@@ -56,10 +56,12 @@ fn decode_exact<T: Decode<()>>(data: &[u8]) -> SyncCoreResult<T> {
 mod tests {
     use super::{EmptyTaskResult, RangeTask};
     use crate::handler::TaskPayload;
+    use stonfi_sync_core::sync_engine::SyncHeight;
 
     #[test]
     fn test_range_task_round_trip_and_trailing_bytes() -> anyhow::Result<()> {
-        let task = RangeTask { from: 10, to: 20 };
+        let from = SyncHeight::from(u32::MAX) + 1;
+        let task = RangeTask { from, to: from + 10 };
         let encoded = task.encode()?;
 
         assert_eq!(RangeTask::decode(&encoded)?, task);

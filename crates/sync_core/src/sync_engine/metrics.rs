@@ -2,16 +2,18 @@ use crate::sync_engine::SyncHeight;
 use std::time::Duration;
 use stonfi_metrics::MetricsCell;
 use stonfi_metrics::constants::DURATION_BUCKETS_1MS_20S;
-use stonfi_metrics::prometheus::{self, HistogramVec, IntCounterVec, IntGaugeVec};
+use stonfi_metrics::prometheus::core::{AtomicU64, GenericGaugeVec, Opts};
+use stonfi_metrics::prometheus::{self, HistogramVec, IntCounterVec};
 use stonfi_metrics::utils::format_duration_ms;
 
 static METRICS: MetricsCell<SyncEngineMetrics> = MetricsCell::new();
+type UIntGaugeVec = GenericGaugeVec<AtomicU64>;
 
 stonfi_metrics::register_metrics!(SyncEngineMetrics, METRICS);
 
 #[derive(strum::IntoStaticStr, Debug)]
 pub(super) enum SyncPhase {
-    Initiator,
+    HeightLoad,
     SyncRange,
     LoadHeight,
     SaveHeight,
@@ -19,8 +21,8 @@ pub(super) enum SyncPhase {
 }
 
 pub(super) struct SyncEngineMetrics {
-    sync_engine_last_initiator_height: IntGaugeVec,
-    sync_engine_last_synced_height: IntGaugeVec,
+    sync_engine_last_loaded_height: UIntGaugeVec,
+    sync_engine_last_synced_height: UIntGaugeVec,
     sync_engine_heights_processed: IntCounterVec,
     sync_engine_height_process_duration_ms: HistogramVec,
     sync_engine_retries: IntCounterVec,
@@ -28,16 +30,16 @@ pub(super) struct SyncEngineMetrics {
 
 impl SyncEngineMetrics {
     fn new() -> anyhow::Result<Self> {
-        let common_labels = &["sync_id"];
-        let phase_labels = &["sync_id", "phase"];
+        let common_labels = &["component_id"];
+        let phase_labels = &["component_id", "phase"];
 
         Ok(Self {
-            sync_engine_last_initiator_height: prometheus::register_int_gauge_vec!(
-                "sync_engine_last_initiator_height",
-                "Max height returned by SyncInitiator::last_height()",
+            sync_engine_last_loaded_height: register_uint_gauge_vec(
+                "sync_engine_last_loaded_height",
+                "Latest height returned by HeightLoader::latest_height()",
                 common_labels,
             )?,
-            sync_engine_last_synced_height: prometheus::register_int_gauge_vec!(
+            sync_engine_last_synced_height: register_uint_gauge_vec(
                 "sync_engine_last_synced_height",
                 "Max synced height",
                 common_labels,
@@ -61,42 +63,51 @@ impl SyncEngineMetrics {
         })
     }
 
-    pub(super) fn update_initiator(sync_id: &str, last_height: SyncHeight) {
+    pub(super) fn update_loaded_height(component_id: &str, latest_height: SyncHeight) {
         METRICS
-            .sync_engine_last_initiator_height
-            .with_label_values(&[sync_id])
-            .set(last_height as i64);
+            .sync_engine_last_loaded_height
+            .with_label_values(&[component_id])
+            .set(latest_height);
     }
 
-    pub(super) fn update_synced_height(sync_id: &str, height: SyncHeight) {
+    pub(super) fn update_synced_height(component_id: &str, height: SyncHeight) {
         METRICS
             .sync_engine_last_synced_height
-            .with_label_values(&[sync_id])
-            .set(height as i64);
+            .with_label_values(&[component_id])
+            .set(height);
     }
 
-    pub(super) fn update_sync(sync_id: &str, from: SyncHeight, to: SyncHeight, duration: Duration) {
+    pub(super) fn update_sync(component_id: &str, from: SyncHeight, to: SyncHeight, duration: Duration) {
         if to < from {
-            log::warn!("[METRICS][{sync_id}] invalid sync range for metrics: from={from}, to={to}");
+            tracing::warn!("[METRICS][{component_id}] invalid sync range for metrics: from={from}, to={to}");
             return;
         }
         let heights_processed = to - from + 1;
-        Self::update_synced_height(sync_id, to);
+        Self::update_synced_height(component_id, to);
 
         METRICS
             .sync_engine_heights_processed
-            .with_label_values(&[sync_id])
-            .inc_by(heights_processed as u64);
+            .with_label_values(&[component_id])
+            .inc_by(heights_processed);
 
         let duration_millis = format_duration_ms(duration);
         let duration_for_height = duration_millis / heights_processed as f64;
         METRICS
             .sync_engine_height_process_duration_ms
-            .with_label_values(&[sync_id])
+            .with_label_values(&[component_id])
             .observe(duration_for_height);
     }
 
-    pub(super) fn inc_retries(sync_id: &str, phase: SyncPhase) {
-        METRICS.sync_engine_retries.with_label_values(&[sync_id, phase.into()]).inc();
+    pub(super) fn inc_retries(component_id: &str, phase: SyncPhase) {
+        METRICS
+            .sync_engine_retries
+            .with_label_values(&[component_id, phase.into()])
+            .inc();
     }
+}
+
+fn register_uint_gauge_vec(name: &str, help: &str, labels: &[&str]) -> anyhow::Result<UIntGaugeVec> {
+    let gauge = UIntGaugeVec::new(Opts::new(name, help), labels)?;
+    prometheus::register(Box::new(gauge.clone()))?;
+    Ok(gauge)
 }

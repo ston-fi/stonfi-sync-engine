@@ -1,33 +1,32 @@
 use crate::errors::{SyncCoreError, SyncCoreResult};
-use crate::sync_engine::callbacks::CallbackStore;
-use crate::sync_engine::initiator::Initiator;
-use crate::sync_engine::multi_receiver::MultiReceiver;
+use crate::sync_engine::height_provider::HeightProvider;
+use crate::sync_engine::progress::MultiReceiver;
 use crate::sync_engine::synchronizer::Synchronizer;
-use crate::sync_engine::traits::SyncTrigger;
-use crate::sync_engine::{SyncCallback, SyncEngine, SyncHeight, SyncStatusManager};
+use crate::sync_engine::traits::ProgressProvider;
+use crate::sync_engine::{INITIAL_SYNC_ID, SyncCallback, SyncEngine, SyncHeight, SyncStatusStore};
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 const DEFAULT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Builds a [`SyncEngine`] with initiators, synchronizers, and callbacks.
+/// Builds a [`SyncEngine`] with height providers, synchronizers, and callbacks.
 pub struct Builder {
-    status_manager: Arc<dyn SyncStatusManager>,
+    status_store: Arc<dyn SyncStatusStore>,
     log_progress: fn(SyncHeight, SyncHeight) -> bool,
-    initiators: Vec<Initiator>,
+    height_providers: Vec<HeightProvider>,
     synchronizers: Vec<(Synchronizer, MultiReceiver)>,
-    callbacks: CallbackStore,
+    callbacks: Vec<Arc<dyn SyncCallback>>,
     registered_ids: HashSet<String>,
     shutdown_timeout: Duration,
 }
 
 impl Builder {
-    pub(super) fn new(status_manager: Arc<dyn SyncStatusManager>) -> Self {
+    pub(super) fn new(status_store: Arc<dyn SyncStatusStore>) -> Self {
         Self {
-            status_manager,
+            status_store,
             log_progress: |_, _| true,
-            initiators: Default::default(),
+            height_providers: Default::default(),
             synchronizers: Default::default(),
             callbacks: Default::default(),
             registered_ids: Default::default(),
@@ -35,61 +34,63 @@ impl Builder {
         }
     }
 
-    /// Registers an initiator.
+    /// Registers a height provider.
     ///
     /// # Errors
     ///
-    /// Returns an error when the initiator ID is empty, has edge whitespace, or
-    /// duplicates another registered entity ID.
-    pub fn add_initiator(mut self, initiator: Initiator) -> SyncCoreResult<Self> {
-        let initiator_id = initiator.id().to_owned();
-        validate_sync_id(&initiator_id)?;
-        if !self.registered_ids.insert(initiator_id.clone()) {
+    /// Returns an error when the height provider ID is empty, has edge whitespace,
+    /// equals the reserved `INITIAL_SYNC_ID`, or duplicates another registered
+    /// component ID.
+    pub fn add_height_provider(mut self, height_provider: HeightProvider) -> SyncCoreResult<Self> {
+        let component_id = height_provider.id().to_owned();
+        validate_component_id(&component_id)?;
+        if !self.registered_ids.insert(component_id.clone()) {
             return Err(SyncCoreError::logic(format!(
-                "Sync entity with id {initiator_id} is already registered"
+                "Sync component with id {component_id} is already registered"
             )));
         }
-        self.initiators.push(initiator);
+        self.height_providers.push(height_provider);
         Ok(self)
     }
 
-    /// Registers a synchronizer and the referenced triggers it depends on.
+    /// Registers a synchronizer and its upstream progress providers.
     ///
     /// # Errors
     ///
-    /// Returns an error for an empty or edge-whitespace ID, missing triggers,
-    /// duplicate IDs, or invalid range limits.
-    pub fn add_sync(mut self, sync: Synchronizer, triggers: &[&dyn SyncTrigger]) -> SyncCoreResult<Self> {
-        let sync_id = sync.handler.id().to_owned();
-        validate_sync_id(&sync_id)?;
-        let min_sync_range = sync.handler.min_sync_range();
-        let max_sync_range = sync.handler.max_sync_range();
-        if min_sync_range == 0
-            || max_sync_range == 0
-            || min_sync_range > max_sync_range
-            || SyncHeight::try_from(min_sync_range).is_err()
-            || SyncHeight::try_from(max_sync_range).is_err()
+    /// Returns an error for an empty, edge-whitespace, or reserved
+    /// `INITIAL_SYNC_ID`, missing progress providers, duplicate IDs, or invalid range
+    /// limits.
+    pub fn add_synchronizer(mut self, sync: Synchronizer, providers: &[&dyn ProgressProvider]) -> SyncCoreResult<Self> {
+        let component_id = sync.handler.id().to_owned();
+        validate_component_id(&component_id)?;
+        let min_batch_size = sync.handler.min_batch_size();
+        let max_batch_size = sync.handler.max_batch_size();
+        if min_batch_size == 0
+            || max_batch_size == 0
+            || min_batch_size > max_batch_size
+            || SyncHeight::try_from(min_batch_size).is_err()
+            || SyncHeight::try_from(max_batch_size).is_err()
         {
             let err_msg = format!(
-                "Synchronizer {sync_id} has invalid sync range: min_sync_range={min_sync_range}, max_sync_range={max_sync_range}"
+                "Synchronizer {component_id} has invalid batch size: min_batch_size={min_batch_size}, max_batch_size={max_batch_size}"
             );
             return Err(SyncCoreError::Logic(err_msg));
         }
 
-        if !self.registered_ids.insert(sync_id.clone()) {
-            let err_msg = format!("Sync entity with id {sync_id} is already registered");
+        if !self.registered_ids.insert(component_id.clone()) {
+            let err_msg = format!("Sync component with id {component_id} is already registered");
             return Err(SyncCoreError::Logic(err_msg));
         }
 
-        let receivers = triggers.iter().map(|trigger| trigger.receiver()).collect();
-        let multi_receiver = MultiReceiver::new(receivers)?;
-        self.synchronizers.push((sync, multi_receiver));
+        let receivers = providers.iter().map(|provider| provider.subscribe()).collect();
+        let receiver = MultiReceiver::new(receivers)?;
+        self.synchronizers.push((sync, receiver));
         Ok(self)
     }
 
     /// Registers a callback that will observe engine events.
     pub fn add_callback(mut self, callback: Arc<dyn SyncCallback>) -> Self {
-        self.callbacks.add(callback);
+        self.callbacks.push(callback);
         self
     }
 
@@ -122,24 +123,29 @@ impl Builder {
     /// Finalizes the builder and returns the engine.
     pub fn build(self) -> SyncEngine {
         SyncEngine {
-            status_manager: self.status_manager,
-            callbacks: Arc::new(self.callbacks),
+            status_store: self.status_store,
+            callbacks: self.callbacks,
             log_progress: self.log_progress,
-            initiators: self.initiators,
+            height_providers: self.height_providers,
             synchronizers: self.synchronizers,
             shutdown_timeout: self.shutdown_timeout,
         }
     }
 }
 
-fn validate_sync_id(sync_id: &str) -> SyncCoreResult<()> {
-    if sync_id.is_empty() {
-        return Err(SyncCoreError::invalid_args("sync ID must not be empty"));
+fn validate_component_id(component_id: &str) -> SyncCoreResult<()> {
+    if component_id.is_empty() {
+        return Err(SyncCoreError::invalid_args("component ID must not be empty"));
     }
-    if sync_id.trim() != sync_id {
+    if component_id.trim() != component_id {
         return Err(SyncCoreError::invalid_args(
-            "sync ID must not have leading or trailing whitespace",
+            "component ID must not have leading or trailing whitespace",
         ));
+    }
+    if component_id == INITIAL_SYNC_ID {
+        return Err(SyncCoreError::invalid_args(format!(
+            "component ID {INITIAL_SYNC_ID} is reserved for the initial synced height"
+        )));
     }
     Ok(())
 }

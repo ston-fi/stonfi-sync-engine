@@ -1,6 +1,6 @@
 use crate::coordinator::{Coordinator, TaskPriority};
 use crate::handler::{DistributedSyncHandler, TaskPayload};
-use crate::{timeout_deadline, timeout_millis};
+use crate::utils::{timeout_deadline, validate_timeout_millis};
 use futures::future::try_join_all;
 use std::sync::Arc;
 use std::time::Duration;
@@ -22,40 +22,21 @@ impl DistributedSynchronizer {
     ///
     /// # Errors
     ///
-    /// Returns an error when the handler ID or synchronization timeout cannot
-    /// be represented by the distributed protocol.
+    /// Returns an error when the synchronization timeout cannot be represented
+    /// by the distributed protocol.
     pub fn new<H>(handler: Arc<H>, coordinator: Coordinator) -> SyncCoreResult<Self>
     where
         H: DistributedSyncHandler,
     {
-        validate_handler_id(handler.id())?;
-        let _ = timeout_millis(handler.sync_timeout(), "distributed handler synchronization timeout")?;
+        validate_timeout_millis(handler.sync_timeout(), "distributed handler synchronization timeout")?;
         Ok(Self { handler, coordinator })
     }
-}
-
-pub(crate) fn validate_handler_id(handler_id: &str) -> SyncCoreResult<()> {
-    if handler_id.is_empty() {
-        return Err(stonfi_sync_core::errors::SyncCoreError::invalid_args(
-            "distributed handler ID must not be empty",
-        ));
-    }
-    if handler_id.trim() != handler_id {
-        return Err(stonfi_sync_core::errors::SyncCoreError::invalid_args(
-            "distributed handler ID must not have leading or trailing whitespace",
-        ));
-    }
-    Ok(())
 }
 
 #[async_trait::async_trait]
 impl SyncHandler for DistributedSynchronizer {
     fn id(&self) -> &str {
         self.handler.id()
-    }
-
-    fn initial_synced_height(&self) -> SyncHeight {
-        self.handler.initial_synced_height()
     }
 
     async fn sync_range(&mut self, from: SyncHeight, to: SyncHeight) -> SyncCoreResult<Option<SyncHeight>> {
@@ -79,31 +60,30 @@ impl SyncHandler for DistributedSynchronizer {
         self.handler.is_enabled()
     }
 
-    fn sleep_on_error(&self) -> Duration {
-        self.handler.sleep_on_error()
+    fn retry_delay(&self) -> Duration {
+        self.handler.retry_delay()
     }
 
-    fn min_sync_range(&self) -> usize {
-        self.handler.min_sync_range()
+    fn min_batch_size(&self) -> usize {
+        self.handler.min_batch_size()
     }
 
-    fn max_sync_range(&self) -> usize {
-        self.handler.max_sync_range()
+    fn max_batch_size(&self) -> usize {
+        self.handler.max_batch_size()
     }
 
     fn sync_timeout(&self) -> Duration {
         self.handler.sync_timeout()
     }
 
-    fn allow_wrap(&self) -> bool {
-        self.handler.allow_wrap()
+    fn allow_rewind(&self) -> bool {
+        self.handler.allow_rewind()
     }
 }
 
 #[async_trait::async_trait]
 pub(crate) trait ErasedHandler: Send + Sync {
     fn id(&self) -> &str;
-    fn initial_synced_height(&self) -> SyncHeight;
     async fn create_tasks_bytes(
         &self,
         from: SyncHeight,
@@ -118,11 +98,11 @@ pub(crate) trait ErasedHandler: Send + Sync {
     fn task_priority(&self) -> TaskPriority;
     fn is_service_task(&self) -> bool;
     fn is_enabled(&self) -> bool;
-    fn sleep_on_error(&self) -> Duration;
-    fn min_sync_range(&self) -> usize;
-    fn max_sync_range(&self) -> usize;
+    fn retry_delay(&self) -> Duration;
+    fn min_batch_size(&self) -> usize;
+    fn max_batch_size(&self) -> usize;
     fn sync_timeout(&self) -> Duration;
-    fn allow_wrap(&self) -> bool;
+    fn allow_rewind(&self) -> bool;
 }
 
 #[async_trait::async_trait]
@@ -132,10 +112,6 @@ where
 {
     fn id(&self) -> &str {
         DistributedSyncHandler::id(self)
-    }
-
-    fn initial_synced_height(&self) -> SyncHeight {
-        DistributedSyncHandler::initial_synced_height(self)
     }
 
     async fn create_tasks_bytes(
@@ -183,23 +159,23 @@ where
         DistributedSyncHandler::is_enabled(self)
     }
 
-    fn sleep_on_error(&self) -> Duration {
-        DistributedSyncHandler::sleep_on_error(self)
+    fn retry_delay(&self) -> Duration {
+        DistributedSyncHandler::retry_delay(self)
     }
 
-    fn min_sync_range(&self) -> usize {
-        DistributedSyncHandler::min_sync_range(self)
+    fn min_batch_size(&self) -> usize {
+        DistributedSyncHandler::min_batch_size(self)
     }
 
-    fn max_sync_range(&self) -> usize {
-        DistributedSyncHandler::max_sync_range(self)
+    fn max_batch_size(&self) -> usize {
+        DistributedSyncHandler::max_batch_size(self)
     }
 
     fn sync_timeout(&self) -> Duration {
         DistributedSyncHandler::sync_timeout(self)
     }
 
-    fn allow_wrap(&self) -> bool {
-        DistributedSyncHandler::allow_wrap(self)
+    fn allow_rewind(&self) -> bool {
+        DistributedSyncHandler::allow_rewind(self)
     }
 }

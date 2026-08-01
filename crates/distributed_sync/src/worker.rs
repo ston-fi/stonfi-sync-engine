@@ -5,7 +5,7 @@ mod metrics;
 use crate::proto::complete_request::Outcome;
 use crate::proto::{CompleteRequest, TaskAssignment};
 use crate::synchronizer::ErasedHandler;
-use crate::timeout_deadline;
+use crate::utils::timeout_deadline;
 use builder::Builder;
 use futures::stream::{FuturesUnordered, StreamExt};
 use grpc_client::GrpcClient;
@@ -112,7 +112,7 @@ impl WorkerRunHandle {
                         task.abort();
                     }
                 } else {
-                    log::warn!("[DISTRIBUTED_SYNC][WORKER] additional join failure: {error}");
+                    tracing::warn!("[DISTRIBUTED_SYNC][WORKER] additional join failure: {error}");
                 }
             }
         }
@@ -160,7 +160,7 @@ async fn run_loop(inner: Arc<Inner>, cancellation: CancellationToken) {
                 },
                 Err(error) => {
                     WorkerMetrics::poll(PollOutcome::Error);
-                    log::warn!("[DISTRIBUTED_SYNC][WORKER][{}] poll failed: {error}", inner.worker_id);
+                    tracing::warn!("[DISTRIBUTED_SYNC][WORKER][{}] poll failed: {error}", inner.worker_id);
                     break;
                 },
             };
@@ -210,7 +210,7 @@ async fn run_loop(inner: Arc<Inner>, cancellation: CancellationToken) {
 
             if let Err(error) = client.complete(completion).await {
                 WorkerMetrics::task(&handler_id, WorkerTaskStatus::CompletionFailed, started_at.elapsed());
-                log::warn!("[DISTRIBUTED_SYNC][WORKER][{}] completion RPC failed: {error}", inner.worker_id);
+                tracing::warn!("[DISTRIBUTED_SYNC][WORKER][{}] completion RPC failed: {error}", inner.worker_id);
                 break;
             }
         }
@@ -232,7 +232,7 @@ async fn connect(inner: &Inner, cancellation: &CancellationToken) -> Option<Grpc
         match result {
             Ok(client) => return Some(client),
             Err(error) => {
-                log::warn!("[DISTRIBUTED_SYNC][WORKER][{}] connection failed: {error}", inner.worker_id);
+                tracing::warn!("[DISTRIBUTED_SYNC][WORKER][{}] connection failed: {error}", inner.worker_id);
                 tokio::select! {
                     biased;
                     _ = cancellation.cancelled() => return None,
@@ -257,7 +257,7 @@ async fn processing_permit(
             match permit {
                 Ok(Ok(permit)) => ProcessingPermit::Acquired(permit),
                 Ok(Err(error)) => {
-                    log::error!("[DISTRIBUTED_SYNC][WORKER] task semaphore closed: {error}");
+                    tracing::error!("[DISTRIBUTED_SYNC][WORKER] task semaphore closed: {error}");
                     ProcessingPermit::Stopped
                 },
                 Err(_) => ProcessingPermit::TimedOut,
@@ -354,10 +354,6 @@ mod tests {
 
         fn id(&self) -> &str {
             self.id
-        }
-
-        fn initial_synced_height(&self) -> SyncHeight {
-            0
         }
 
         async fn create_tasks(

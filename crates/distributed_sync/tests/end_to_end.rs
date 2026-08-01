@@ -9,9 +9,9 @@ use stonfi_distributed_sync::synchronizer::DistributedSynchronizer;
 use stonfi_distributed_sync::task_server::TaskServer;
 use stonfi_distributed_sync::worker::Worker;
 use stonfi_sync_core::errors::{SyncCoreError, SyncCoreResult};
-use stonfi_sync_core::mem_status_manager::MemStatusManager;
+use stonfi_sync_core::mem_status_store::MemStatusStore;
 use stonfi_sync_core::sync_engine::{
-    Initiator, SyncEngine, SyncHandler, SyncHeight, SyncInitiator, SyncStatusManager, Synchronizer,
+    HeightLoader, HeightProvider, SyncEngine, SyncHandler, SyncHeight, SyncStatusStore, Synchronizer,
 };
 
 fn init_test_metrics() -> anyhow::Result<()> {
@@ -98,10 +98,6 @@ impl DistributedSyncHandler for TestHandler {
         self.id
     }
 
-    fn initial_synced_height(&self) -> SyncHeight {
-        0
-    }
-
     async fn create_tasks(&self, _from: SyncHeight, to: SyncHeight) -> SyncCoreResult<Option<TaskBatch<Self::Task>>> {
         tokio::time::sleep(self.create_delay).await;
         Ok(Some(TaskBatch::new(to, vec![TestTask(1), TestTask(2), TestTask(3)])))
@@ -129,21 +125,21 @@ impl DistributedSyncHandler for TestHandler {
         self.sync_timeout
     }
 
-    fn sleep_on_error(&self) -> Duration {
+    fn retry_delay(&self) -> Duration {
         self.retry_calls.fetch_add(1, Ordering::SeqCst);
         Duration::from_millis(10)
     }
 }
 
-struct OneHeightInitiator;
+struct OneHeightLoader;
 
 #[async_trait::async_trait]
-impl SyncInitiator for OneHeightInitiator {
+impl HeightLoader for OneHeightLoader {
     fn id(&self) -> &str {
         "one-height"
     }
 
-    async fn last_height(&mut self, after: SyncHeight) -> SyncCoreResult<SyncHeight> {
+    async fn latest_height(&mut self, after: SyncHeight) -> SyncCoreResult<SyncHeight> {
         if after == 0 {
             return Ok(1);
         }
@@ -163,10 +159,6 @@ impl DistributedSyncHandler for EmptyBatchHandler {
 
     fn id(&self) -> &str {
         "empty-batch"
-    }
-
-    fn initial_synced_height(&self) -> SyncHeight {
-        0
     }
 
     async fn create_tasks(&self, _from: SyncHeight, to: SyncHeight) -> SyncCoreResult<Option<TaskBatch<Self::Task>>> {
@@ -195,10 +187,6 @@ impl DistributedSyncHandler for PanickingHandler {
 
     fn id(&self) -> &str {
         "panicking-handler"
-    }
-
-    fn initial_synced_height(&self) -> SyncHeight {
-        0
     }
 
     async fn create_tasks(&self, _from: SyncHeight, to: SyncHeight) -> SyncCoreResult<Option<TaskBatch<Self::Task>>> {
@@ -230,17 +218,17 @@ async fn test_sync_engine_runs_through_server_and_worker() -> anyhow::Result<()>
     init_test_metrics()?;
     let handler = Arc::new(TestHandler::new("engine-end-to-end", false, Duration::from_millis(1)));
     let (distributed, worker, server) = setup(handler.clone(), 2).await?;
-    let initiator = Initiator::new(OneHeightInitiator);
-    let status_manager = Arc::new(MemStatusManager::new());
-    let engine = SyncEngine::builder(status_manager.clone())
-        .add_sync(Synchronizer::new(distributed), &[&initiator])?
-        .add_initiator(initiator)?
+    let height_provider = HeightProvider::new(OneHeightLoader);
+    let status_store = Arc::new(MemStatusStore::new(0));
+    let engine = SyncEngine::builder(status_store.clone())
+        .add_synchronizer(Synchronizer::new(distributed), &[&height_provider])?
+        .add_height_provider(height_provider)?
         .build()
         .run();
 
     tokio::time::timeout(Duration::from_secs(1), async {
         loop {
-            if status_manager.load_synced_height(handler.id()).await? == Some(1) {
+            if status_store.load_synced_height(handler.id()).await? == Some(1) {
                 return Ok::<(), SyncCoreError>(());
             }
             tokio::task::yield_now().await;
@@ -531,8 +519,6 @@ fn test_registration_and_configuration_validation() -> anyhow::Result<()> {
             .is_err()
     );
 
-    let blank = Arc::new(TestHandler::new(" ", false, Duration::from_millis(1)));
-    assert!(DistributedSynchronizer::new(blank, Coordinator::new()).is_err());
     let zero_timeout =
         Arc::new(TestHandler::new("zero-timeout", false, Duration::from_millis(1)).with_sync_timeout(Duration::ZERO));
     assert!(DistributedSynchronizer::new(zero_timeout, Coordinator::new()).is_err());

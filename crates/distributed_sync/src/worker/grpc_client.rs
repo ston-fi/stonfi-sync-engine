@@ -1,6 +1,6 @@
 use crate::proto::task_service_client::TaskServiceClient;
 use crate::proto::{CompleteRequest, PollRequest, TaskAssignment};
-use crate::timeout_millis;
+use crate::utils::timeout_millis;
 use std::time::Duration;
 use stonfi_sync_core::errors::{SyncCoreError, SyncCoreResult};
 use tonic::transport::{Channel, Endpoint};

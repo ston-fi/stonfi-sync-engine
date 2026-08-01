@@ -4,15 +4,17 @@ All notable changes to `stonfi_distributed_sync` are documented here.
 
 ## Unreleased
 
+- Update examples and integration coverage for the core `HeightLoader`,
+  `HeightProvider`, and `ProgressProvider` API.
+- Remove initial-height configuration from `DistributedSyncHandler`; the core
+  `SyncStatusStore` now owns and persists the engine-wide fallback.
+- Emit diagnostics through `tracing` while preserving message text and levels.
+- Use the core `u64` `SyncHeight` domain and the `retry_delay`, batch-size, and
+  rewind handler controls. `RangeTask` serializes the full height range.
 - Add the initial public distributed synchronization coordinator, gRPC task
   server, worker, payload contract, lifecycle handles, and metrics.
-- Introduce the versioned `stonfi.distributed_sync.v1` protocol as a deliberate
-  clean break from Tongrid's private `distributed_sync` implementation.
-- Reimplement the behavior reviewed at Tongrid revision
-  `7bdf790d2e081112ecb733fa5450694114c12b62` without Tongrid or Commons
-  dependencies.
-- Name the shared process-local coordination state
-  `coordinator::Coordinator`; no earlier public path has been released.
+- Use the versioned `stonfi.distributed_sync.v1` poll and completion protocol.
+- Expose shared process-local coordination through `coordinator::Coordinator`.
 - Delegate metric-cell initialization exclusively to application startup
   through `stonfi_metrics::init_metrics!`.
 - Keep assignment routing worker-agnostic except for service-task support;
@@ -22,9 +24,8 @@ All notable changes to `stonfi_distributed_sync` are documented here.
 - Back off failed task attempts within the synchronization deadline.
 - Use one batch deadline across task creation, coordinator queueing, worker
   capacity waits, and task processing.
-- Replace server and worker configuration structs with private-module builders,
-  default worker parallelism to the system's available parallelism, and simplify queue and run
-  handle internals without changing dispatch behavior.
+- Configure servers and workers through private-module builders and default
+  worker parallelism to the system's available parallelism.
 - Document every direct dependency required by the canonical consumer example.
 - Clarify service-queue preference and priority/FIFO ordering, and relax
   `TaskPayload` values from `Send + Sync` to `Send`.

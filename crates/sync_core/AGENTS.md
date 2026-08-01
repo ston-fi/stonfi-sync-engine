@@ -10,48 +10,54 @@ refactors, and release preparation.
 The `crates/sync_core` package coordinates dependency-aware synchronization of
 ordered heights:
 
-- `SyncInitiator` discovers upstream progress.
+- `HeightLoader` loads the latest available height from an upstream source.
 - `SyncHandler` processes bounded inclusive ranges.
-- `SyncStatusManager` persists committed progress.
-- `SyncTrigger` connects initiators and synchronizers into a dependency graph.
+- `SyncStatusStore` persists committed progress and owns the configured initial
+  height fallback.
+- `ProgressProvider` supplies progress subscriptions that connect height
+  providers and synchronizers into a dependency graph.
 - `SyncCallback` observes lifecycle events.
 
 The crate does not provide distributed locking, multi-writer conflict
-resolution, storage, a Tokio runtime, or distributed task transport. Add the
-planned distributed implementation as a separate workspace package under
-`crates/distributed_sync`; do not add gRPC, protobuf, task-server, or worker
-dependencies to the core package or hide that surface behind a core feature.
+resolution, a durable storage implementation, a Tokio runtime, or distributed
+task transport. Those transport concerns belong to the sibling
+`crates/distributed_sync` package; do not add gRPC, protobuf, server, or worker
+dependencies to the core package.
 
 ## Public API and ownership
 
 Keep public paths module-qualified: errors and result types live in `errors`,
-the in-memory implementation lives in `mem_status_manager`, and all engine
+the in-memory implementation lives in `mem_status_store`, and all engine
 types and extension traits live in `sync_engine`. Do not add root re-exports.
-`SyncEngine`, `Builder`, `Initiator`, `Synchronizer`, `RunHandle`, and
-`MemStatusManager` are the primary consumer types. The five `Sync*` traits above
-are intentional downstream extension points and must remain externally
-implementable.
+`SyncEngine`, `Builder`, `HeightProvider`, `Synchronizer`, `RunHandle`, and
+`MemStatusStore` are the primary consumer types. `HeightLoader`, `SyncHandler`,
+`SyncStatusStore`, `ProgressProvider`, and `SyncCallback` are intentional
+downstream extension points and must remain externally implementable.
 
 Public ID boundaries use `&str`; store IDs privately as `String` only where
-ownership is required. Initiators and handlers belong to one task and require
-`Send + 'static`, not `Sync`. `SyncHandler::sync_range` takes `&mut self` so
-stateful handlers do not need internal synchronization. Status managers and
-callbacks are shared across tasks and require `Send + Sync + 'static`.
+ownership is required. Height loaders and handlers belong to one task and
+require `Send + 'static`, not `Sync`. `SyncHandler::sync_range` takes
+`&mut self` so stateful handlers do not need internal synchronization. Status
+stores and callbacks are shared across tasks and require `Send + Sync + 'static`.
 
 Prefer `SyncEngine::builder`, add synchronizers with references to their
-triggers, add the corresponding initiators, then build and run. The builder
-clones progress receivers while retaining single ownership of initiators and
-synchronizers. `SyncEngine::run` consumes the engine definition and returns the
-runtime owner. Use `RunHandle::shutdown` for bounded awaited shutdown; dropping
-the handle only signals best-effort shutdown. Use `RunHandle::wait` only when
-every task can finish naturally.
+upstream progress providers, add the corresponding height providers, then
+build and run. The builder subscribes to progress before retaining single
+ownership of height providers and synchronizers. It cannot verify that a
+referenced provider is later registered: dropping an unregistered provider
+closes its channel and stops the dependant. `SyncEngine::run` consumes the
+engine definition and returns the runtime owner. Use `RunHandle::shutdown` for
+bounded awaited shutdown; dropping the handle only signals best-effort
+shutdown. Use `RunHandle::wait` only when every task can finish naturally.
 
 Consumers use the Git dependency documented in `README.md`. The crate requires
 a running Tokio runtime before `SyncEngine::run` is called and returns typed
 `SyncCoreError` values for configuration and consumer failures.
-`SyncEngine::builder` is infallible because it only stores the status manager;
-keep `Builder::add_sync` and `Builder::add_initiator` fallible because
-validation happens when each entity is registered.
+Library diagnostics use `tracing` without embedded ANSI escapes; applications
+own subscriber configuration. Do not add terminal styling to library messages.
+`SyncEngine::builder` is infallible because it only stores the status store;
+keep `Builder::add_synchronizer` and `Builder::add_height_provider` fallible
+because validation happens when each entity is registered.
 
 Engine metrics are private global collectors registered through
 `stonfi_metrics::register_metrics!`. Applications call
@@ -61,22 +67,40 @@ access the registered cells directly and therefore panic if startup skipped
 initialization. Do not initialize individual metric cells from engine
 constructors, add redundant availability checks, reintroduce per-engine
 collector APIs, or expose Prometheus types publicly.
+All engine metric series use `component_id` for the height-provider or
+synchronizer identifier label.
+Height gauges store `u64`, but Prometheus exposition converts numeric samples
+to `f64` and may lose unit precision above `2^53`; this does not narrow the
+engine or status-store height domain.
 
 ## Invariants and pitfalls
 
-- Every initiator and synchronizer ID must be unique within one engine.
-- Only one active engine may write a given sync ID. The status-manager API is
-  not compare-and-set storage.
-- Range limits are positive, fit in `SyncHeight`, and satisfy `min <= max`.
+- Every height provider and synchronizer component ID must be unique within one
+  engine.
+- Dependency graphs must be acyclic. The builder subscribes to providers but
+  does not perform graph discovery or cycle detection.
+- `INITIAL_SYNC_ID` (`"INITIAL"`) is reserved for the status store's durable
+  engine-wide baseline and must never identify a height provider, synchronizer,
+  or dependency-graph entity.
+- Only one active engine may write a given sync ID. The status-store API is
+  not compare-and-set storage; this also applies to `INITIAL_SYNC_ID`.
+- `SyncStatusStore::load_synced_or_initial` prefers per-sync state, then the
+  persisted `INITIAL` state, and only then stores and returns the configured
+  fallback.
+- `SyncHeight` is `u64`; height `0` remains the initial no-progress sentinel.
+- Batch sizes are positive, fit in `SyncHeight`, and satisfy `min <= max`.
 - `sync_range(from, to)` processes an inclusive range and may report only a
-  height in that range unless `allow_wrap()` is enabled.
+  height in that range unless `allow_rewind()` is enabled.
 - Returning `Ok(None)` defers progress; it does not commit or publish a height.
 - Callback failures are retried only while the engine is active. Callbacks must
   be idempotent because earlier callbacks may replay; delivery is not durable
   across shutdown or restart.
-- An upstream trigger decrease does not rewind dependants or cancel progress
-  selected by an active wait. Each handler controls its own wrap behavior
-  through `allow_wrap()`; subsequent waits use current trigger values.
+- Initial source discovery invokes `on_height_loaded`; a nonzero initial value
+  is published and then invokes `on_height_published`, both from previous
+  height `0`.
+- An upstream progress decrease does not rewind dependants or cancel progress
+  selected by an active wait. Each handler controls its own rewind behavior
+  through `allow_rewind()`; subsequent waits use current provider values.
 - Retry loops are cooperative. Consumer futures must return or enforce their
   own timeout if bounded shutdown latency is required.
 - Do not add parallel builders, aliases, convenience re-exports, or alternate
@@ -89,10 +113,11 @@ collector APIs, or expose Prometheus types publicly.
 ## Changing the crate
 
 For public API, behavior, feature, workspace, dependency, or package-surface
-changes, review and update the README, rustdoc, example, tests, this guide,
-changelog, CI, and package include rules in the same change, or record why an
-artifact is unaffected. Add deterministic tests for owned behavior and failure
-modes, not for third-party behavior or metric registration.
+changes, review and update the README, rustdoc, example, tests, this guide, CI,
+and package include rules in the same change, or record why an artifact is
+unaffected. Do not manually populate `CHANGELOG.md`; release-plz release PRs own
+generated entries. Add deterministic tests for owned behavior and failure modes,
+not for third-party behavior or metric registration.
 
 Use `Result`-returning Rust tests with `?` whenever a called operation is
 fallible. Keep changes narrow and avoid refactoring the synchronizer state

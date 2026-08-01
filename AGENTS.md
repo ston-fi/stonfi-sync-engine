@@ -17,7 +17,7 @@ All packages live under `crates/`:
 Do not implement distributed synchronization as a `stonfi_sync_core` feature.
 The packages have different dependencies, runtime responsibilities, public API
 boundaries, and release concerns. Each package must have its own manifest,
-README, agent guide, changelog, examples or integration tests where useful, and
+README, agent guide, examples or integration tests where useful, and
 public-library review.
 
 Package-specific API, ownership, lifecycle, metrics, and compatibility rules
@@ -30,7 +30,9 @@ guide and the relevant package guide.
 - Keep package names, paths, README links, CI commands, lockfile, and workspace
   members synchronized.
 - Preserve independent package versioning. A workspace tag may release one or
-  more packages, but each affected changelog must state what the tag contains.
+  more packages.
+- Do not manually maintain package changelogs during development. Release-plz
+  release PRs own generated changelog entries unless the release policy changes.
 - Review package contents from the workspace root with
   `cargo package --list -p <package>`.
 - Do not introduce shared workspace dependencies until at least two packages

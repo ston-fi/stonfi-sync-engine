@@ -3,20 +3,19 @@ use crate::sync_engine::SyncHeight;
 use futures::{StreamExt, stream::FuturesUnordered};
 use tokio::sync::watch::{Receiver, Sender};
 
-pub(super) type SyncSender = Sender<SyncHeight>;
-/// Receives the latest completed height from an initiator or synchronizer.
-pub type SyncReceiver = Receiver<SyncHeight>;
+pub(super) type ProgressSender = Sender<SyncHeight>;
+/// Receives the latest published height from a height provider or synchronizer.
+pub type ProgressReceiver = Receiver<SyncHeight>;
 
 /// Waits for the minimum usable height from all configured sources.
 pub(super) struct MultiReceiver {
-    receivers: Vec<SyncReceiver>,
+    receivers: Vec<ProgressReceiver>,
 }
 
 impl MultiReceiver {
-    // We don't expect much here
-    pub(super) fn new(receivers: Vec<SyncReceiver>) -> SyncCoreResult<Self> {
+    pub(super) fn new(receivers: Vec<ProgressReceiver>) -> SyncCoreResult<Self> {
         if receivers.is_empty() {
-            return Err(SyncCoreError::invalid_args("receivers can't be empty"));
+            return Err(SyncCoreError::invalid_args("progress providers can't be empty"));
         }
         Ok(Self { receivers })
     }
@@ -29,7 +28,7 @@ impl MultiReceiver {
                 return None;
             }
             let Some(min_height) = cur_values.iter().copied().min() else {
-                log::warn!("[MULTI_RECEIVER] no receivers available while waiting for progress");
+                tracing::warn!("[PROGRESS] no receivers available while waiting for progress");
                 return None;
             };
             if min_height > after {
@@ -51,7 +50,7 @@ impl MultiReceiver {
                 Some(Some((idx, val))) => cur_values[idx] = val,
                 Some(None) => return None, // receiver closed
                 None => {
-                    log::warn!("[MULTI_RECEIVER] no blocking receivers left while progress is still pending");
+                    tracing::warn!("[PROGRESS] no blocking receivers left while progress is still pending");
                     return None;
                 },
             }
@@ -69,14 +68,14 @@ mod tests {
     async fn changed_works() -> anyhow::Result<()> {
         let (tx1, rx1) = watch::channel(15);
         let (tx2, rx2) = watch::channel(20);
-        let mut multi_receiver = MultiReceiver::new(vec![rx1, rx2])?;
-        assert_eq!(Some(15), multi_receiver.wait_after(14).await);
+        let mut receivers = MultiReceiver::new(vec![rx1, rx2])?;
+        assert_eq!(Some(15), receivers.wait_after(14).await);
         tx2.send(30)?;
-        assert_eq!(Some(15), multi_receiver.wait_after(14).await);
+        assert_eq!(Some(15), receivers.wait_after(14).await);
         tx1.send(25)?;
-        assert_eq!(Some(25), multi_receiver.wait_after(15).await);
+        assert_eq!(Some(25), receivers.wait_after(15).await);
         tx1.send(35)?;
-        assert_eq!(Some(30), multi_receiver.wait_after(25).await);
+        assert_eq!(Some(30), receivers.wait_after(25).await);
         Ok(())
     }
 
@@ -85,9 +84,9 @@ mod tests {
         let (tx1, rx1) = watch::channel(100);
         let (tx2, rx2) = watch::channel(1);
         let (tx3, rx3) = watch::channel(1);
-        let mut multi_receiver = MultiReceiver::new(vec![rx1, rx2, rx3])?;
+        let mut receivers = MultiReceiver::new(vec![rx1, rx2, rx3])?;
 
-        let task = tokio::spawn(async move { multi_receiver.wait_after(1).await });
+        let task = tokio::spawn(async move { receivers.wait_after(1).await });
         tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
         tx1.send(101)?;
         tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
@@ -101,28 +100,28 @@ mod tests {
 
     #[tokio::test]
     async fn changed_parent_does_not_rewind_an_active_wait() -> anyhow::Result<()> {
-        let (wrapped_tx, wrapped_rx) = watch::channel(20);
+        let (rewound_tx, rewound_rx) = watch::channel(20);
         let (blocking_tx, blocking_rx) = watch::channel(10);
-        let mut multi_receiver = MultiReceiver::new(vec![wrapped_rx, blocking_rx])?;
+        let mut receivers = MultiReceiver::new(vec![rewound_rx, blocking_rx])?;
 
         {
-            let current_wait = multi_receiver.wait_after(10);
+            let current_wait = receivers.wait_after(10);
             futures::pin_mut!(current_wait);
             assert!(futures::poll!(&mut current_wait).is_pending());
 
-            wrapped_tx.send(0)?;
+            rewound_tx.send(0)?;
             blocking_tx.send(11)?;
             assert_eq!(Some(11), current_wait.await);
         }
 
         {
-            let next_wait = multi_receiver.wait_after(11);
+            let next_wait = receivers.wait_after(11);
             futures::pin_mut!(next_wait);
             assert!(futures::poll!(&mut next_wait).is_pending());
 
             blocking_tx.send(12)?;
             assert!(futures::poll!(&mut next_wait).is_pending());
-            wrapped_tx.send(12)?;
+            rewound_tx.send(12)?;
             assert_eq!(Some(12), next_wait.await);
         }
         Ok(())
@@ -132,8 +131,8 @@ mod tests {
     async fn changed_returns_none_when_receiver_closed() -> anyhow::Result<()> {
         let (tx, rx) = watch::channel(0);
         drop(tx);
-        let mut multi_receiver = MultiReceiver::new(vec![rx])?;
-        assert_eq!(None, multi_receiver.wait_after(0).await);
+        let mut receivers = MultiReceiver::new(vec![rx])?;
+        assert_eq!(None, receivers.wait_after(0).await);
         Ok(())
     }
 
@@ -141,9 +140,9 @@ mod tests {
     async fn changed_returns_none_when_all_blocking_receivers_close() -> anyhow::Result<()> {
         let (tx1, rx1) = watch::channel(0);
         let (_tx2, rx2) = watch::channel(10);
-        let mut multi_receiver = MultiReceiver::new(vec![rx1, rx2])?;
+        let mut receivers = MultiReceiver::new(vec![rx1, rx2])?;
 
-        let task = tokio::spawn(async move { multi_receiver.wait_after(0).await });
+        let task = tokio::spawn(async move { receivers.wait_after(0).await });
         tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
         drop(tx1);
 
