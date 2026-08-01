@@ -1,7 +1,7 @@
 # `stonfi_sync_core`
 
 `stonfi_sync_core` is a small asynchronous engine for synchronizing ordered
-heights through a dependency graph. Initiators discover upstream progress,
+heights through a dependency graph. Height providers discover upstream progress,
 synchronizers process inclusive ranges, and status stores persist committed
 heights.
 
@@ -39,10 +39,11 @@ stonfi_sync_core = { git = "https://github.com/ston-fi/stonfi-sync-engine", rev 
 stonfi_metrics = { version = "0.0.1", git = "https://github.com/ston-fi/stonfi-metrics", rev = "v0.0.1" }
 ```
 
-The crate requires a Tokio runtime. Implement [`SyncInitiator`] for each source,
-[`SyncHandler`] for each processor, and [`SyncStatusStore`] for durable
-progress. Wrap implementations with [`Initiator`] and [`Synchronizer`], connect
-their triggers through [`SyncEngine::builder`], and call [`SyncEngine::run`].
+The crate requires a Tokio runtime. Implement [`HeightLoader`] for each source,
+[`SyncHandler`] for each range handler, and [`SyncStatusStore`] for durable
+progress. Wrap implementations with [`HeightProvider`] and [`Synchronizer`],
+connect their progress providers through [`SyncEngine::builder`], and call
+[`SyncEngine::run`].
 
 See [`examples/simple.rs`](examples/simple.rs) for a complete runnable example.
 
@@ -58,21 +59,21 @@ use std::future::Future;
 use std::sync::Arc;
 use stonfi_sync_core::{
     errors::SyncCoreResult,
-    sync_engine::{Initiator, SyncEngine, SyncStatusStore, Synchronizer},
+    sync_engine::{HeightProvider, SyncEngine, SyncStatusStore, Synchronizer},
 };
 
 async fn run_until<F>(
     status_store: Arc<dyn SyncStatusStore>,
-    source: Initiator,
-    processor: Synchronizer,
+    source: HeightProvider,
+    synchronizer: Synchronizer,
     shutdown: F,
 ) -> SyncCoreResult<()>
 where
     F: Future<Output = ()>,
 {
     let engine = SyncEngine::builder(status_store)
-        .add_synchronizer(processor, &[&source])?
-        .add_initiator(source)?
+        .add_synchronizer(synchronizer, &[&source])?
+        .add_height_provider(source)?
         .build();
 
     let run_handle = engine.run();
@@ -94,8 +95,8 @@ order:
 3. the store's configured fallback, saved under `INITIAL_SYNC_ID` before it is
    returned.
 
-`INITIAL_SYNC_ID` is reserved storage state. It cannot be registered as an
-initiator or synchronizer and never participates in the dependency graph.
+`INITIAL_SYNC_ID` is reserved storage state. It cannot be registered as a
+height provider or synchronizer and never participates in the dependency graph.
 Only one active engine may initialize or write it because status stores do not
 provide compare-and-set coordination.
 
@@ -121,23 +122,24 @@ provide compare-and-set coordination.
   Delivery is not persisted or guaranteed across shutdown, process failure, or
   restart.
 - Returning `Ok(None)` from [`SyncHandler::sync_range`] defers that range until
-  an upstream trigger advances again.
+  an upstream progress provider advances again.
 - `allow_rewind()` permits a handler to publish a lower height. Upstream
   decreases do not rewind dependants or cancel an active wait; later waits use
-  current trigger values.
+  current progress-provider values.
 
 ## Public API
 
 Public items use module-qualified paths. Error types are under [`errors`], the
 in-memory status implementation is under [`mem_status_store`], and engine types
 and extension traits are under [`sync_engine`]. The main types are [`SyncEngine`],
-[`Builder`], [`Initiator`], [`Synchronizer`], [`RunHandle`], and
-[`MemStatusStore`]. Consumer-owned extension points are [`SyncInitiator`],
-[`SyncHandler`], [`SyncStatusStore`], [`SyncTrigger`], and [`SyncCallback`].
+[`Builder`], [`HeightProvider`], [`Synchronizer`], [`RunHandle`], and
+[`MemStatusStore`]. Consumer-owned extension points are [`HeightLoader`],
+[`SyncHandler`], [`SyncStatusStore`], [`ProgressProvider`], and [`SyncCallback`].
+Each progress subscription returns a [`ProgressReceiver`].
 Pass dependencies by reference to `Builder::add_synchronizer`; the builder
-clones their progress receivers before their owners are registered.
+subscribes to each [`ProgressProvider`] before its owner is registered.
 
-Initiators and handlers are owned by one engine task and need only implement
+Height providers and handlers are owned by one engine task and need only implement
 `Send + 'static`. `SyncHandler::sync_range` receives `&mut self`, so stateful
 implementations can update their own fields without internal locking. Status
 stores and callbacks are shared between tasks and therefore remain
@@ -166,6 +168,9 @@ Initialization is idempotent. Engine values never initialize or register
 collectors themselves; metric access before startup initialization panics by
 design.
 
+All engine metric series identify their height provider or synchronizer with
+the `component_id` label.
+
 Height gauges use unsigned `u64` storage. Prometheus exposes numeric samples as
 `f64`, so scraped height values above `2^53` may lose unit precision; engine
 processing and `SyncStatusStore` persistence still retain the full `u64` value.
@@ -191,7 +196,7 @@ cargo package --list --locked -p stonfi_sync_core
 
 [`Builder`]: crate::sync_engine::Builder
 [`Builder::with_shutdown_timeout`]: crate::sync_engine::Builder::with_shutdown_timeout
-[`Initiator`]: crate::sync_engine::Initiator
+[`HeightProvider`]: crate::sync_engine::HeightProvider
 [`MemStatusStore`]: crate::mem_status_store::MemStatusStore
 [`RunHandle`]: crate::sync_engine::RunHandle
 [`RunHandle::shutdown`]: crate::sync_engine::RunHandle::shutdown
@@ -203,11 +208,12 @@ cargo package --list --locked -p stonfi_sync_core
 [`SyncHandler`]: crate::sync_engine::SyncHandler
 [`SyncHandler::sync_range`]: crate::sync_engine::SyncHandler::sync_range
 [`INITIAL_SYNC_ID`]: crate::sync_engine::INITIAL_SYNC_ID
-[`SyncInitiator`]: crate::sync_engine::SyncInitiator
+[`HeightLoader`]: crate::sync_engine::HeightLoader
 [`SyncStatusStore`]: crate::sync_engine::SyncStatusStore
 [`SyncStatusStore::initial_synced_height`]: crate::sync_engine::SyncStatusStore::initial_synced_height
 [`SyncStatusStore::load_synced_or_initial`]: crate::sync_engine::SyncStatusStore::load_synced_or_initial
-[`SyncTrigger`]: crate::sync_engine::SyncTrigger
+[`ProgressProvider`]: crate::sync_engine::ProgressProvider
+[`ProgressReceiver`]: crate::sync_engine::ProgressReceiver
 [`Synchronizer`]: crate::sync_engine::Synchronizer
 [`errors`]: crate::errors
 [`mem_status_store`]: crate::mem_status_store

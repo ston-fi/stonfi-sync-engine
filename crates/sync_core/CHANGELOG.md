@@ -4,6 +4,15 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+- Replace the initiator/trigger vocabulary with `HeightLoader`,
+  `HeightProvider`, and `ProgressProvider`. Rename registration to
+  `Builder::add_height_provider`, progress subscriptions to
+  `ProgressProvider::subscribe`, callback hooks to `on_height_load_error`,
+  `on_height_loaded`, and `on_height_published`, and channel aliases to
+  `ProgressReceiver` and private `ProgressSender`.
+- Rename the source-height metric to `sync_engine_last_loaded_height`, its
+  retry phase label to `HeightLoad`, and the common metric label to
+  `component_id`.
 - Move the initial synced-height fallback from `SyncHandler` into
   `SyncStatusStore`. Stores now provide a configured fallback and
   `load_synced_or_initial`, persist it under the reserved `INITIAL_SYNC_ID`,
@@ -29,5 +38,5 @@ All notable changes to this project are documented in this file.
   cancellation requirements it places on handler effects.
 - Bound cooperative engine shutdown and abort stuck consumer tasks after the
   configured timeout.
-- Reject empty and whitespace-padded sync IDs and support the maximum remaining
+- Reject empty and whitespace-padded component IDs and support the maximum remaining
   `SyncHeight` range without intermediate overflow.

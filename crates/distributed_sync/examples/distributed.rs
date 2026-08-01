@@ -9,12 +9,14 @@ use stonfi_distributed_sync::task_server::TaskServer;
 use stonfi_distributed_sync::worker::Worker;
 use stonfi_sync_core::errors::SyncCoreResult;
 use stonfi_sync_core::mem_status_store::MemStatusStore;
-use stonfi_sync_core::sync_engine::{Initiator, SyncEngine, SyncHeight, SyncInitiator, SyncStatusStore, Synchronizer};
+use stonfi_sync_core::sync_engine::{
+    HeightLoader, HeightProvider, SyncEngine, SyncHeight, SyncStatusStore, Synchronizer,
+};
 
-struct OneHeightInitiator;
+struct OneHeightLoader;
 
 #[async_trait::async_trait]
-impl SyncInitiator for OneHeightInitiator {
+impl HeightLoader for OneHeightLoader {
     fn id(&self) -> &str {
         "source"
     }
@@ -72,11 +74,11 @@ async fn main() -> anyhow::Result<()> {
         .build()?;
     let worker_handle = worker.run();
 
-    let initiator = Initiator::new(OneHeightInitiator);
+    let height_provider = HeightProvider::new(OneHeightLoader);
     let status_store = Arc::new(MemStatusStore::new(0));
     let engine = SyncEngine::builder(status_store.clone())
-        .add_synchronizer(Synchronizer::new(distributed), &[&initiator])?
-        .add_initiator(initiator)?
+        .add_synchronizer(Synchronizer::new(distributed), &[&height_provider])?
+        .add_height_provider(height_provider)?
         .build();
     let engine_handle = engine.run();
 

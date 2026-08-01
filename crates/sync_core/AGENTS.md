@@ -10,11 +10,12 @@ refactors, and release preparation.
 The `crates/sync_core` package coordinates dependency-aware synchronization of
 ordered heights:
 
-- `SyncInitiator` discovers upstream progress.
+- `HeightLoader` loads the latest available height from an upstream source.
 - `SyncHandler` processes bounded inclusive ranges.
 - `SyncStatusStore` persists committed progress and owns the configured initial
   height fallback.
-- `SyncTrigger` connects initiators and synchronizers into a dependency graph.
+- `ProgressProvider` supplies progress subscriptions that connect height
+  providers and synchronizers into a dependency graph.
 - `SyncCallback` observes lifecycle events.
 
 The crate does not provide distributed locking, multi-writer conflict
@@ -27,24 +28,24 @@ not add gRPC, protobuf, server, or worker dependencies to the core package.
 Keep public paths module-qualified: errors and result types live in `errors`,
 the in-memory implementation lives in `mem_status_store`, and all engine
 types and extension traits live in `sync_engine`. Do not add root re-exports.
-`SyncEngine`, `Builder`, `Initiator`, `Synchronizer`, `RunHandle`, and
-`MemStatusStore` are the primary consumer types. The five `Sync*` traits above
-are intentional downstream extension points and must remain externally
-implementable.
+`SyncEngine`, `Builder`, `HeightProvider`, `Synchronizer`, `RunHandle`, and
+`MemStatusStore` are the primary consumer types. `HeightLoader`, `SyncHandler`,
+`SyncStatusStore`, `ProgressProvider`, and `SyncCallback` are intentional
+downstream extension points and must remain externally implementable.
 
 Public ID boundaries use `&str`; store IDs privately as `String` only where
-ownership is required. Initiators and handlers belong to one task and require
-`Send + 'static`, not `Sync`. `SyncHandler::sync_range` takes `&mut self` so
-stateful handlers do not need internal synchronization. Status stores and
-callbacks are shared across tasks and require `Send + Sync + 'static`.
+ownership is required. Height loaders and handlers belong to one task and
+require `Send + 'static`, not `Sync`. `SyncHandler::sync_range` takes
+`&mut self` so stateful handlers do not need internal synchronization. Status
+stores and callbacks are shared across tasks and require `Send + Sync + 'static`.
 
 Prefer `SyncEngine::builder`, add synchronizers with references to their
-triggers, add the corresponding initiators, then build and run. The builder
-clones progress receivers while retaining single ownership of initiators and
-synchronizers. `SyncEngine::run` consumes the engine definition and returns the
-runtime owner. Use `RunHandle::shutdown` for bounded awaited shutdown; dropping
-the handle only signals best-effort shutdown. Use `RunHandle::wait` only when
-every task can finish naturally.
+upstream progress providers, add the corresponding height providers, then
+build and run. The builder subscribes to progress before retaining single
+ownership of height providers and synchronizers. `SyncEngine::run` consumes
+the engine definition and returns the runtime owner. Use `RunHandle::shutdown`
+for bounded awaited shutdown; dropping the handle only signals best-effort
+shutdown. Use `RunHandle::wait` only when every task can finish naturally.
 
 Consumers use the Git dependency documented in `README.md`. The crate requires
 a running Tokio runtime before `SyncEngine::run` is called and returns typed
@@ -52,7 +53,7 @@ a running Tokio runtime before `SyncEngine::run` is called and returns typed
 Library diagnostics use `tracing` without embedded ANSI escapes; applications
 own subscriber configuration. Do not add terminal styling to library messages.
 `SyncEngine::builder` is infallible because it only stores the status store;
-keep `Builder::add_synchronizer` and `Builder::add_initiator` fallible because
+keep `Builder::add_synchronizer` and `Builder::add_height_provider` fallible because
 validation happens when each entity is registered.
 
 Engine metrics are private global collectors registered through
@@ -63,16 +64,19 @@ access the registered cells directly and therefore panic if startup skipped
 initialization. Do not initialize individual metric cells from engine
 constructors, add redundant availability checks, reintroduce per-engine
 collector APIs, or expose Prometheus types publicly.
+All engine metric series use `component_id` for the height-provider or
+synchronizer identifier label.
 Height gauges store `u64`, but Prometheus exposition converts numeric samples
 to `f64` and may lose unit precision above `2^53`; this does not narrow the
 engine or status-store height domain.
 
 ## Invariants and pitfalls
 
-- Every initiator and synchronizer ID must be unique within one engine.
+- Every height provider and synchronizer component ID must be unique within one
+  engine.
 - `INITIAL_SYNC_ID` (`"INITIAL"`) is reserved for the status store's durable
-  engine-wide baseline and must never identify an initiator, synchronizer, or
-  dependency-graph node.
+  engine-wide baseline and must never identify a height provider, synchronizer,
+  or dependency-graph entity.
 - Only one active engine may write a given sync ID. The status-store API is
   not compare-and-set storage; this also applies to `INITIAL_SYNC_ID`.
 - `SyncStatusStore::load_synced_or_initial` prefers per-sync state, then the
@@ -86,9 +90,9 @@ engine or status-store height domain.
 - Callback failures are retried only while the engine is active. Callbacks must
   be idempotent because earlier callbacks may replay; delivery is not durable
   across shutdown or restart.
-- An upstream trigger decrease does not rewind dependants or cancel progress
+- An upstream progress decrease does not rewind dependants or cancel progress
   selected by an active wait. Each handler controls its own rewind behavior
-  through `allow_rewind()`; subsequent waits use current trigger values.
+  through `allow_rewind()`; subsequent waits use current provider values.
 - Retry loops are cooperative. Consumer futures must return or enforce their
   own timeout if bounded shutdown latency is required.
 - Do not add parallel builders, aliases, convenience re-exports, or alternate

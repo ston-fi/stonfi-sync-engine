@@ -4,19 +4,19 @@ use std::time::Duration;
 use stonfi_sync_core::errors::SyncCoreResult;
 use stonfi_sync_core::mem_status_store::MemStatusStore;
 use stonfi_sync_core::sync_engine::{
-    Initiator, SyncCallback, SyncEngine, SyncHandler, SyncHeight, SyncInitiator, SyncStatusStore, Synchronizer,
+    HeightLoader, HeightProvider, SyncCallback, SyncEngine, SyncHandler, SyncHeight, SyncStatusStore, Synchronizer,
 };
 use tracing_subscriber::EnvFilter;
 
-// A toy initiator that reveals a fixed target height one step at a time.
+// A toy height loader that reveals a fixed target height one step at a time.
 // In production this would usually poll a chain node, queue, or external API.
-struct ExampleInitiator {
+struct ExampleHeightLoader {
     id: &'static str,
     max_height: SyncHeight,
 }
 
 #[async_trait::async_trait]
-impl SyncInitiator for ExampleInitiator {
+impl HeightLoader for ExampleHeightLoader {
     fn id(&self) -> &str {
         self.id
     }
@@ -61,32 +61,32 @@ struct ExampleCallback;
 
 #[async_trait::async_trait]
 impl SyncCallback for ExampleCallback {
-    async fn on_initiator_next_height(
+    async fn on_height_loaded(
         &self,
-        sync_id: &str,
+        component_id: &str,
         prev_height: SyncHeight,
         next_height: SyncHeight,
     ) -> SyncCoreResult<()> {
         if next_height <= prev_height {
             return Ok(());
         }
-        tracing::info!("callback: initiator {sync_id} advanced from {prev_height} to {next_height}");
+        tracing::info!("callback: height provider {component_id} advanced from {prev_height} to {next_height}");
         Ok(())
     }
 
-    async fn on_sync_start(&self, sync_id: &str, from: SyncHeight, to: SyncHeight) -> SyncCoreResult<()> {
-        tracing::info!("callback: sync {sync_id} started range [{from}, {to}]");
+    async fn on_sync_start(&self, component_id: &str, from: SyncHeight, to: SyncHeight) -> SyncCoreResult<()> {
+        tracing::info!("callback: sync {component_id} started range [{from}, {to}]");
         Ok(())
     }
 
     async fn on_sync_complete(
         &self,
-        sync_id: &str,
+        component_id: &str,
         from: SyncHeight,
         to: SyncHeight,
         processed_to: SyncHeight,
     ) -> SyncCoreResult<()> {
-        tracing::info!("callback: sync {sync_id} finished requested [{from}, {to}] and committed {processed_to}");
+        tracing::info!("callback: sync {component_id} finished requested [{from}, {to}] and committed {processed_to}");
         Ok(())
     }
 }
@@ -102,22 +102,22 @@ async fn main() -> anyhow::Result<()> {
     // the first synchronizer starts without persisted status.
     let status_store = Arc::new(MemStatusStore::new(0));
 
-    let initiator = Initiator::new(ExampleInitiator {
-        id: "example_initiator",
+    let height_provider = HeightProvider::new(ExampleHeightLoader {
+        id: "example_height_source",
         max_height: 5,
     });
     let synchronizer = Synchronizer::new(ExampleHandler { id: "example_sync" });
 
     // The builder wires together:
-    // 1. the initiator that discovers new heights
+    // 1. the height provider that discovers new heights
     // 2. the synchronizer that processes them
     // 3. the callback that observes the lifecycle
     //
-    // Passing `&initiator` makes the synchronizer depend on its progress. The
+    // Passing `&height_provider` makes the synchronizer depend on its progress. The
     // builder clones the progress receiver before taking ownership below.
     let engine = SyncEngine::builder(status_store.clone())
-        .add_synchronizer(synchronizer, &[&initiator])?
-        .add_initiator(initiator)?
+        .add_synchronizer(synchronizer, &[&height_provider])?
+        .add_height_provider(height_provider)?
         .add_callback(Arc::new(ExampleCallback))
         .build();
 
@@ -134,7 +134,7 @@ async fn main() -> anyhow::Result<()> {
 
     let final_height = status_store.load_synced_height("example_sync").await?;
     tracing::info!("final synced height: {}", final_height.unwrap_or_default());
-    tracing::info!("swap the toy initiator/handler with real implementations to build your service.");
+    tracing::info!("swap the toy height loader/handler with real implementations to build your service.");
 
     Ok(())
 }

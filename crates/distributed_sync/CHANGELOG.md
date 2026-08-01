@@ -4,6 +4,8 @@ All notable changes to `stonfi_distributed_sync` are documented here.
 
 ## Unreleased
 
+- Update examples and integration coverage for the core `HeightLoader`,
+  `HeightProvider`, and `ProgressProvider` API.
 - Remove initial-height configuration from `DistributedSyncHandler`; the core
   `SyncStatusStore` now owns and persists the engine-wide fallback.
 - Emit diagnostics through `tracing` while preserving message text and levels.

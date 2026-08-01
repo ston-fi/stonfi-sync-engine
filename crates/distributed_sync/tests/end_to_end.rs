@@ -11,7 +11,7 @@ use stonfi_distributed_sync::worker::Worker;
 use stonfi_sync_core::errors::{SyncCoreError, SyncCoreResult};
 use stonfi_sync_core::mem_status_store::MemStatusStore;
 use stonfi_sync_core::sync_engine::{
-    Initiator, SyncEngine, SyncHandler, SyncHeight, SyncInitiator, SyncStatusStore, Synchronizer,
+    HeightLoader, HeightProvider, SyncEngine, SyncHandler, SyncHeight, SyncStatusStore, Synchronizer,
 };
 
 fn init_test_metrics() -> anyhow::Result<()> {
@@ -131,10 +131,10 @@ impl DistributedSyncHandler for TestHandler {
     }
 }
 
-struct OneHeightInitiator;
+struct OneHeightLoader;
 
 #[async_trait::async_trait]
-impl SyncInitiator for OneHeightInitiator {
+impl HeightLoader for OneHeightLoader {
     fn id(&self) -> &str {
         "one-height"
     }
@@ -218,11 +218,11 @@ async fn test_sync_engine_runs_through_server_and_worker() -> anyhow::Result<()>
     init_test_metrics()?;
     let handler = Arc::new(TestHandler::new("engine-end-to-end", false, Duration::from_millis(1)));
     let (distributed, worker, server) = setup(handler.clone(), 2).await?;
-    let initiator = Initiator::new(OneHeightInitiator);
+    let height_provider = HeightProvider::new(OneHeightLoader);
     let status_store = Arc::new(MemStatusStore::new(0));
     let engine = SyncEngine::builder(status_store.clone())
-        .add_synchronizer(Synchronizer::new(distributed), &[&initiator])?
-        .add_initiator(initiator)?
+        .add_synchronizer(Synchronizer::new(distributed), &[&height_provider])?
+        .add_height_provider(height_provider)?
         .build()
         .run();
 
