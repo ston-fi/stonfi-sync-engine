@@ -2,7 +2,6 @@
 mod _tests;
 mod builder;
 mod callbacks;
-mod colors;
 mod initiator;
 mod metrics;
 mod multi_receiver;

@@ -1,5 +1,4 @@
 use crate::sync_engine::callbacks::CallbackStore;
-use crate::sync_engine::colors::*;
 use crate::sync_engine::metrics::{SyncEngineMetrics, SyncPhase};
 use crate::sync_engine::multi_receiver::{MultiReceiver, SyncReceiver, SyncSender};
 use crate::sync_engine::traits::SyncTrigger;
@@ -48,23 +47,23 @@ impl Synchronizer {
     #[rustfmt::skip]
     pub(super) async fn run(mut self, mut ctx: SyncCtx) {
         let sync_id = self.handler.id().to_owned();
-        let log_prefix = format!("SYNC][{COLOR_PINK}{sync_id}{COLOR_RESET}");
+        let log_prefix = format!("SYNC][{sync_id}");
 
         let mut synced_height = match self.load_synced_height_loop(&ctx, &log_prefix).await {
             Some(height) => height,
             None => {
                 let initial_synced_height = self.handler.initial_synced_height();
-                tracing::info!("[{log_prefix}] no persisted synced height, using initial: {COLOR_GREEN}{initial_synced_height}{COLOR_RESET}");
+                tracing::info!("[{log_prefix}] no persisted synced height, using initial: {initial_synced_height}");
                 initial_synced_height
             },
         };
 
         if ctx.cancellation.is_cancelled() {
-            tracing::info!("[{log_prefix}] {COLOR_GREEN}finished{COLOR_RESET}: shutdown requested");
+            tracing::info!("[{log_prefix}] finished: shutdown requested");
             return;
         }
 
-        tracing::info!("[{log_prefix}] started with synced_height: {COLOR_GREEN}{synced_height}{COLOR_RESET}");
+        tracing::info!("[{log_prefix}] started with synced_height: {synced_height}");
         // initial send - to trigger children if new blocks won't come for a long time
         if !self.publish_height(&log_prefix, synced_height) {
             return;
@@ -89,7 +88,7 @@ impl Synchronizer {
             let start_ts = Instant::now();
 
             if !self.handler.is_enabled() {
-                tracing::debug!("[{log_prefix}] range [{COLOR_RED}{synced_height}{COLOR_RESET}, {COLOR_RED}{next_height}{COLOR_RESET}]: skipped (sync is disabled)");
+                tracing::debug!("[{log_prefix}] range [{synced_height}, {next_height}]: skipped (sync is disabled)");
                 if sleep_or_cancelled(&ctx.cancellation, SLEEP_IF_DISABLED).await {
                     break;
                 }
@@ -99,7 +98,7 @@ impl Synchronizer {
 
             let sync_from = synced_height + 1;
             let Some(sync_to) = self.calc_sync_to(sync_from, next_height) else {
-                tracing::debug!("[{log_prefix}] range [{COLOR_RED}{sync_from}{COLOR_RESET}, {COLOR_RED}{next_height}{COLOR_RESET}]: skipped (range mismatch)");
+                tracing::debug!("[{log_prefix}] range [{sync_from}, {next_height}]: skipped (range mismatch)");
                 wait_after_height = next_height; // do nothing
                 continue;
             };
@@ -112,19 +111,19 @@ impl Synchronizer {
             }
 
             let range_log_prefix_expected =
-                format!("{log_prefix}] sync [{sync_from}, {next_height}] -> [{COLOR_GREEN}{sync_from}{COLOR_RESET}, {COLOR_GREEN}{sync_to}{COLOR_RESET}");
+                format!("{log_prefix}] sync [{sync_from}, {next_height}] -> [{sync_from}, {sync_to}");
 
             let Some(new_synced_height) = self
                 .sync_range_loop(&ctx, &range_log_prefix_expected, sync_from, sync_to)
                 .await
             else {
-                tracing::debug!("[{log_prefix}] range [{COLOR_GREEN}{sync_from}{COLOR_RESET}, {COLOR_RED}{sync_to}{COLOR_RESET}]: skipped (ignored)");
+                tracing::debug!("[{log_prefix}] range [{sync_from}, {sync_to}]: skipped (ignored)");
                 wait_after_height = next_height;
                 continue;
             };
 
             let range_log_prefix_actual =
-                format!("{log_prefix}] sync [{sync_from}, {next_height}] -> [{COLOR_GREEN}{sync_from}{COLOR_RESET}, {COLOR_GREEN}{new_synced_height}{COLOR_RESET}");
+                format!("{log_prefix}] sync [{sync_from}, {next_height}] -> [{sync_from}, {new_synced_height}");
 
             if !self
                 .save_synced_height_loop(&ctx, &range_log_prefix_actual, new_synced_height)
@@ -147,18 +146,18 @@ impl Synchronizer {
             let sync_duration = start_ts.elapsed();
             if new_synced_height < sync_from {
                 SyncEngineMetrics::update_synced_height(&sync_id, new_synced_height);
-                tracing::info!("[{range_log_prefix_actual}]: rewound to {COLOR_GREEN}{new_synced_height}{COLOR_RESET} ({sync_duration:.3?})");
+                tracing::info!("[{range_log_prefix_actual}]: rewound to {new_synced_height} ({sync_duration:.3?})");
             } else {
                 SyncEngineMetrics::update_sync(&sync_id, sync_from, synced_height, sync_duration);
                 let synced_range = new_synced_height - sync_from + 1;
                 if (ctx.log_progress)(sync_from, sync_to) {
-                    tracing::info!("[{range_log_prefix_actual}]: done ({COLOR_GREEN}{synced_range}{COLOR_RESET} heights, {sync_duration:.3?})");
+                    tracing::info!("[{range_log_prefix_actual}]: done ({synced_range} heights, {sync_duration:.3?})");
                 } else {
-                    tracing::debug!("[{range_log_prefix_actual}]: done ({COLOR_GREEN}{synced_range}{COLOR_RESET} heights, {sync_duration:.3?})");
+                    tracing::debug!("[{range_log_prefix_actual}]: done ({synced_range} heights, {sync_duration:.3?})");
                 }
             }
         }
-        tracing::info!("[{log_prefix}] {COLOR_GREEN}finished{COLOR_RESET}: shutdown requested")
+        tracing::info!("[{log_prefix}] finished: shutdown requested")
     }
 
     async fn on_sync_start_loop(&mut self, ctx: &SyncCtx, log_prefix: &str, from: SyncHeight, to: SyncHeight) -> bool {
@@ -171,7 +170,7 @@ impl Synchronizer {
                 Err(err) => {
                     let sync_id = self.handler.id();
                     tracing::error!(
-                        "[{log_prefix}] {COLOR_RED}callback on_sync_start({sync_id}, {from}, {to}) failed with err: {err}, retrying..."
+                        "[{log_prefix}] callback on_sync_start({sync_id}, {from}, {to}) failed with err: {err}, retrying..."
                     );
                     SyncEngineMetrics::inc_retries(sync_id, SyncPhase::Callback);
                     if sleep_or_cancelled(&ctx.cancellation, self.handler.retry_delay()).await {
@@ -217,24 +216,24 @@ impl Synchronizer {
                 Ok(Ok(Some(synced_height))) if (from..=to).contains(&synced_height) => return Some(synced_height),
                 Ok(Ok(Some(synced_height))) if synced_height > to => {
                     tracing::warn!(
-                        "[{log_prefix}] {COLOR_RED}Got invalid synced height: {synced_height}, expected in range [{from}, {to}] ({:.3?}). Retrying...",
+                        "[{log_prefix}] Got invalid synced height: {synced_height}, expected in range [{from}, {to}] ({:.3?}). Retrying...",
                         start_ts.elapsed()
                     );
                     if !self.on_sync_error_loop(ctx, log_prefix, from, to).await { return None; }
                 },
                 Ok(Ok(Some(synced_height))) => {
                     tracing::warn!(
-                        "[{log_prefix}] {COLOR_RED}Got invalid rewound synced height: {synced_height}, expected in range [{from}, {to}] or lower only when allow_rewind() is enabled ({:.3?}). Retrying...",
+                        "[{log_prefix}] Got invalid rewound synced height: {synced_height}, expected in range [{from}, {to}] or lower only when allow_rewind() is enabled ({:.3?}). Retrying...",
                         start_ts.elapsed()
                     );
                     if !self.on_sync_error_loop(ctx, log_prefix, from, to).await { return None; }
                 },
                 Ok(Err(err)) => {
-                    tracing::warn!("[{log_prefix}] {COLOR_RED}Got error: {err} ({:.3?}). Retrying...", start_ts.elapsed());
+                    tracing::warn!("[{log_prefix}] Got error: {err} ({:.3?}). Retrying...", start_ts.elapsed());
                     if !self.on_sync_error_loop(ctx, log_prefix, from, to).await { return None; }
                 },
                 Err(_) => {
-                    tracing::warn!("[{log_prefix}] {COLOR_RED}Timed out after {sync_timeout:.3?}. Retrying...");
+                    tracing::warn!("[{log_prefix}] Timed out after {sync_timeout:.3?}. Retrying...");
                     if !self.on_sync_error_loop(ctx, log_prefix, from, to).await { return None; }
                 },
             }
@@ -260,7 +259,7 @@ impl Synchronizer {
             if let Err(err) = ctx.callbacks.on_sync_error(self.handler.id(), from, to).await {
                 let sync_id = self.handler.id();
                 tracing::error!(
-                    "[{log_prefix}] {COLOR_RED}callback on_sync_error({sync_id}, {from}, {to}) failed with err: {err}, retrying..."
+                    "[{log_prefix}] callback on_sync_error({sync_id}, {from}, {to}) failed with err: {err}, retrying..."
                 );
                 SyncEngineMetrics::inc_retries(sync_id, SyncPhase::Callback);
                 if sleep_or_cancelled(&ctx.cancellation, self.handler.retry_delay()).await {
@@ -324,7 +323,7 @@ impl Synchronizer {
                 Err(err) => {
                     let sync_id = self.handler.id();
                     tracing::error!(
-                        "[{log_prefix}] {COLOR_RED}callback on_sync_complete({sync_id}, {from}, {to}, {processed_to}) failed with err: {err}, retrying..."
+                        "[{log_prefix}] callback on_sync_complete({sync_id}, {from}, {to}, {processed_to}) failed with err: {err}, retrying..."
                     );
                     SyncEngineMetrics::inc_retries(sync_id, SyncPhase::Callback);
                     if sleep_or_cancelled(&ctx.cancellation, self.handler.retry_delay()).await {

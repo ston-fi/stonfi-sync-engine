@@ -1,5 +1,4 @@
 use crate::sync_engine::callbacks::CallbackStore;
-use crate::sync_engine::colors::{COLOR_GREEN, COLOR_PINK, COLOR_RED, COLOR_RESET};
 use crate::sync_engine::metrics::{SyncEngineMetrics, SyncPhase};
 use crate::sync_engine::multi_receiver::{SyncReceiver, SyncSender};
 use crate::sync_engine::traits::{SyncInitiator, SyncTrigger};
@@ -47,17 +46,17 @@ impl Initiator {
     #[rustfmt::skip]
     pub(super) async fn run(mut self, ctx: InitiatorCtx) {
         let initiator_id = self.sync_initiator.id().to_owned();
-        let log_prefix = format!("SYNC_INIT][{COLOR_PINK}{initiator_id}{COLOR_RESET}");
+        let log_prefix = format!("SYNC_INIT][{initiator_id}");
 
         let mut cur_height = loop {
             if ctx.cancellation.is_cancelled() {
-                tracing::info!("[{log_prefix}] {COLOR_GREEN}finished{COLOR_RESET}: shutdown requested");
+                tracing::info!("[{log_prefix}] finished: shutdown requested");
                 return;
             }
             match self.sync_initiator.latest_height(0).await {
                 Ok(height) => break height,
                 Err(err) => {
-                    tracing::error!("[{log_prefix}] {COLOR_RED}Fail to load initial height: {err}, retrying...");
+                    tracing::error!("[{log_prefix}] Fail to load initial height: {err}, retrying...");
                     SyncEngineMetrics::inc_retries(&initiator_id, SyncPhase::Initiator);
                     if !self
                         .on_initiator_error_loop(&ctx, &log_prefix, 0)
@@ -71,7 +70,7 @@ impl Initiator {
         };
         SyncEngineMetrics::update_initiator(&initiator_id, cur_height);
 
-        tracing::info!("[{log_prefix}] started with latest_height: {COLOR_GREEN}{cur_height}{COLOR_RESET}");
+        tracing::info!("[{log_prefix}] started with latest_height: {cur_height}");
         if cur_height > 0 && !self.publish_height(&log_prefix, cur_height) {
             return;
         }
@@ -83,7 +82,7 @@ impl Initiator {
             let new_height = match self.sync_initiator.latest_height(cur_height).await {
                 Ok(height) => height,
                 Err(err) => {
-                    tracing::warn!("[{log_prefix}] {COLOR_RED}latest_height() failed with err: {err}");
+                    tracing::warn!("[{log_prefix}] latest_height() failed with err: {err}");
                     SyncEngineMetrics::inc_retries(&initiator_id, SyncPhase::Initiator);
                     if !self
                         .on_initiator_error_loop(&ctx, &log_prefix, cur_height)
@@ -115,9 +114,9 @@ impl Initiator {
             SyncEngineMetrics::update_initiator(&initiator_id, new_height);
 
             if (ctx.log_progress)(new_height, new_height) {
-                tracing::info!("[{log_prefix}] sent new height: {COLOR_GREEN}{new_height}{COLOR_RESET}");
+                tracing::info!("[{log_prefix}] sent new height: {new_height}");
             } else {
-                tracing::debug!("[{log_prefix}] sent new height: {COLOR_GREEN}{new_height}{COLOR_RESET}");
+                tracing::debug!("[{log_prefix}] sent new height: {new_height}");
             }
 
             if !self
@@ -128,7 +127,7 @@ impl Initiator {
             }
             cur_height = new_height;
         }
-        tracing::info!("[{log_prefix}] {COLOR_GREEN}finished{COLOR_RESET}: shutdown requested")
+        tracing::info!("[{log_prefix}] finished: shutdown requested")
     }
 
     async fn on_initiator_next_height_loop(
@@ -151,7 +150,7 @@ impl Initiator {
                 Err(err) => {
                     let initiator_id = self.sync_initiator.id();
                     tracing::error!(
-                        "[{log_prefix}] {COLOR_RED}callback on_initiator_next_height({initiator_id}, {previous_height}, {next_height}) failed with err: {err}, retrying..."
+                        "[{log_prefix}] callback on_initiator_next_height({initiator_id}, {previous_height}, {next_height}) failed with err: {err}, retrying..."
                     );
                     SyncEngineMetrics::inc_retries(initiator_id, SyncPhase::Callback);
                     if sleep_or_cancelled(&ctx.cancellation, self.sync_initiator.retry_delay()).await {
@@ -173,7 +172,7 @@ impl Initiator {
                     let initiator_id = self.sync_initiator.id();
                     SyncEngineMetrics::inc_retries(initiator_id, SyncPhase::Callback);
                     tracing::error!(
-                        "[{log_prefix}] {COLOR_RED}callback on_initiator_error({initiator_id}, {height}) failed with err: {err}, retrying..."
+                        "[{log_prefix}] callback on_initiator_error({initiator_id}, {height}) failed with err: {err}, retrying..."
                     );
                     if sleep_or_cancelled(&ctx.cancellation, self.sync_initiator.retry_delay()).await {
                         return false;
@@ -203,7 +202,7 @@ impl Initiator {
                 Err(err) => {
                     let initiator_id = self.sync_initiator.id();
                     tracing::error!(
-                        "[{log_prefix}] {COLOR_RED}callback on_initiator_sent({initiator_id}, {previous_height}, {sent_height}) failed with err: {err}, retrying..."
+                        "[{log_prefix}] callback on_initiator_sent({initiator_id}, {previous_height}, {sent_height}) failed with err: {err}, retrying..."
                     );
                     SyncEngineMetrics::inc_retries(initiator_id, SyncPhase::Callback);
                     if sleep_or_cancelled(&ctx.cancellation, self.sync_initiator.retry_delay()).await {

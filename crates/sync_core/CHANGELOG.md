@@ -4,7 +4,7 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
-- Emit diagnostics through `tracing` while preserving message text and levels.
+- Emit diagnostics through `tracing` without embedded ANSI escape sequences.
 - Use `u64` for `SyncHeight` while preserving height `0` as the initial
   no-progress sentinel. Height gauges use unsigned storage; Prometheus
   exposition may lose unit precision above `2^53` while engine and stored

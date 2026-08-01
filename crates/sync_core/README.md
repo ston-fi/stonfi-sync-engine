@@ -150,8 +150,8 @@ processing and `SyncStatusStore` persistence still retain the full `u64` value.
 ## Toolchain and features
 
 The crate uses Rust 2024 and supports Rust 1.93 and newer. It has no optional
-Cargo features. Diagnostics are emitted through `tracing`; applications install
-and configure their own subscriber.
+Cargo features. Diagnostics contain no ANSI escapes and are emitted through
+`tracing`; applications install and configure their own subscriber.
 
 ## Validation
 

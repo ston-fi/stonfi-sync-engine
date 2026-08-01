@@ -48,7 +48,8 @@ every task can finish naturally.
 Consumers use the Git dependency documented in `README.md`. The crate requires
 a running Tokio runtime before `SyncEngine::run` is called and returns typed
 `SyncCoreError` values for configuration and consumer failures.
-Library diagnostics use `tracing`; applications own subscriber configuration.
+Library diagnostics use `tracing` without embedded ANSI escapes; applications
+own subscriber configuration. Do not add terminal styling to library messages.
 `SyncEngine::builder` is infallible because it only stores the status store;
 keep `Builder::add_synchronizer` and `Builder::add_initiator` fallible because
 validation happens when each entity is registered.
