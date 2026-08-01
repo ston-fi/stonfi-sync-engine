@@ -4,7 +4,7 @@ use crate::sync_engine::initiator::Initiator;
 use crate::sync_engine::multi_receiver::MultiReceiver;
 use crate::sync_engine::synchronizer::Synchronizer;
 use crate::sync_engine::traits::SyncTrigger;
-use crate::sync_engine::{SyncCallback, SyncEngine, SyncHeight, SyncStatusManager};
+use crate::sync_engine::{SyncCallback, SyncEngine, SyncHeight, SyncStatusStore};
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -13,7 +13,7 @@ const DEFAULT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Builds a [`SyncEngine`] with initiators, synchronizers, and callbacks.
 pub struct Builder {
-    status_manager: Arc<dyn SyncStatusManager>,
+    status_manager: Arc<dyn SyncStatusStore>,
     log_progress: fn(SyncHeight, SyncHeight) -> bool,
     initiators: Vec<Initiator>,
     synchronizers: Vec<(Synchronizer, MultiReceiver)>,
@@ -23,7 +23,7 @@ pub struct Builder {
 }
 
 impl Builder {
-    pub(super) fn new(status_manager: Arc<dyn SyncStatusManager>) -> Self {
+    pub(super) fn new(status_manager: Arc<dyn SyncStatusStore>) -> Self {
         Self {
             status_manager,
             log_progress: |_, _| true,
@@ -59,19 +59,19 @@ impl Builder {
     ///
     /// Returns an error for an empty or edge-whitespace ID, missing triggers,
     /// duplicate IDs, or invalid range limits.
-    pub fn add_sync(mut self, sync: Synchronizer, triggers: &[&dyn SyncTrigger]) -> SyncCoreResult<Self> {
+    pub fn add_synchronizer(mut self, sync: Synchronizer, triggers: &[&dyn SyncTrigger]) -> SyncCoreResult<Self> {
         let sync_id = sync.handler.id().to_owned();
         validate_sync_id(&sync_id)?;
-        let min_sync_range = sync.handler.min_sync_range();
-        let max_sync_range = sync.handler.max_sync_range();
-        if min_sync_range == 0
-            || max_sync_range == 0
-            || min_sync_range > max_sync_range
-            || SyncHeight::try_from(min_sync_range).is_err()
-            || SyncHeight::try_from(max_sync_range).is_err()
+        let min_batch_size = sync.handler.min_batch_size();
+        let max_batch_size = sync.handler.max_batch_size();
+        if min_batch_size == 0
+            || max_batch_size == 0
+            || min_batch_size > max_batch_size
+            || SyncHeight::try_from(min_batch_size).is_err()
+            || SyncHeight::try_from(max_batch_size).is_err()
         {
             let err_msg = format!(
-                "Synchronizer {sync_id} has invalid sync range: min_sync_range={min_sync_range}, max_sync_range={max_sync_range}"
+                "Synchronizer {sync_id} has invalid batch size: min_batch_size={min_batch_size}, max_batch_size={max_batch_size}"
             );
             return Err(SyncCoreError::Logic(err_msg));
         }

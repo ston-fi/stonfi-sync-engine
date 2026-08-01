@@ -154,15 +154,17 @@ impl Inner {
                 },
                 Ok(Ok(Err(error))) => {
                     CoordinatorMetrics::complete(&handler_id, CoordinatorTaskStatus::Failed, started_at.elapsed());
-                    log::warn!("[DISTRIBUTED_SYNC][{handler_id}] assignment {assignment_id} failed: {error}; retrying");
-                    sleep_before_retry(handler.sleep_on_error(), deadline).await;
+                    tracing::warn!(
+                        "[DISTRIBUTED_SYNC][{handler_id}] assignment {assignment_id} failed: {error}; retrying"
+                    );
+                    sleep_before_retry(handler.retry_delay(), deadline).await;
                 },
                 Ok(Err(error)) => {
                     CoordinatorMetrics::complete(&handler_id, CoordinatorTaskStatus::Failed, started_at.elapsed());
-                    log::warn!(
+                    tracing::warn!(
                         "[DISTRIBUTED_SYNC][{handler_id}] assignment {assignment_id} completion channel closed: {error}; retrying"
                     );
-                    sleep_before_retry(handler.sleep_on_error(), deadline).await;
+                    sleep_before_retry(handler.retry_delay(), deadline).await;
                 },
                 Err(_) => {
                     CoordinatorMetrics::complete(&handler_id, CoordinatorTaskStatus::TimedOut, started_at.elapsed());
@@ -382,7 +384,7 @@ mod tests {
             self.0
         }
 
-        fn sleep_on_error(&self) -> Duration {
+        fn retry_delay(&self) -> Duration {
             Duration::from_millis(20)
         }
     }

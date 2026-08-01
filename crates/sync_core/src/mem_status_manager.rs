@@ -1,9 +1,9 @@
 use crate::errors::SyncCoreResult;
-use crate::sync_engine::{SyncHeight, SyncStatusManager};
+use crate::sync_engine::{SyncHeight, SyncStatusStore};
 use parking_lot::RwLock;
 use std::collections::HashMap;
 
-/// In-memory [`SyncStatusManager`] implementation for tests and ephemeral runs.
+/// In-memory [`SyncStatusStore`] implementation for tests and ephemeral runs.
 pub struct MemStatusManager {
     storage: RwLock<HashMap<String, SyncHeight>>,
 }
@@ -24,7 +24,7 @@ impl Default for MemStatusManager {
 }
 
 #[async_trait::async_trait]
-impl SyncStatusManager for MemStatusManager {
+impl SyncStatusStore for MemStatusManager {
     async fn save_synced_height(&self, sync_id: &str, sync_height: SyncHeight) -> SyncCoreResult<()> {
         self.storage.write().insert(sync_id.to_owned(), sync_height);
         Ok(())

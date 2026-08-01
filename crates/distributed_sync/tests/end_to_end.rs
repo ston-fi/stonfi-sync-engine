@@ -11,7 +11,7 @@ use stonfi_distributed_sync::worker::Worker;
 use stonfi_sync_core::errors::{SyncCoreError, SyncCoreResult};
 use stonfi_sync_core::mem_status_manager::MemStatusManager;
 use stonfi_sync_core::sync_engine::{
-    Initiator, SyncEngine, SyncHandler, SyncHeight, SyncInitiator, SyncStatusManager, Synchronizer,
+    Initiator, SyncEngine, SyncHandler, SyncHeight, SyncInitiator, SyncStatusStore, Synchronizer,
 };
 
 fn init_test_metrics() -> anyhow::Result<()> {
@@ -129,7 +129,7 @@ impl DistributedSyncHandler for TestHandler {
         self.sync_timeout
     }
 
-    fn sleep_on_error(&self) -> Duration {
+    fn retry_delay(&self) -> Duration {
         self.retry_calls.fetch_add(1, Ordering::SeqCst);
         Duration::from_millis(10)
     }
@@ -143,7 +143,7 @@ impl SyncInitiator for OneHeightInitiator {
         "one-height"
     }
 
-    async fn last_height(&mut self, after: SyncHeight) -> SyncCoreResult<SyncHeight> {
+    async fn latest_height(&mut self, after: SyncHeight) -> SyncCoreResult<SyncHeight> {
         if after == 0 {
             return Ok(1);
         }
@@ -233,7 +233,7 @@ async fn test_sync_engine_runs_through_server_and_worker() -> anyhow::Result<()>
     let initiator = Initiator::new(OneHeightInitiator);
     let status_manager = Arc::new(MemStatusManager::new());
     let engine = SyncEngine::builder(status_manager.clone())
-        .add_sync(Synchronizer::new(distributed), &[&initiator])?
+        .add_synchronizer(Synchronizer::new(distributed), &[&initiator])?
         .add_initiator(initiator)?
         .build()
         .run();

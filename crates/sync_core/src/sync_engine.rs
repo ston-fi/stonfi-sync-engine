@@ -25,11 +25,19 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 /// Height unit tracked by the engine.
-pub type SyncHeight = u32;
+///
+/// Height `0` is reserved as the initial no-progress sentinel. Synchronizers
+/// therefore process chain heights starting from `1` unless a consumer maps a
+/// zero-based chain coordinate into this domain.
+///
+/// Prometheus exposes numeric samples as `f64`, so height metrics may lose unit
+/// precision above `2^53` even though engine processing and persistence retain
+/// the full `u64` value.
+pub type SyncHeight = u64;
 
 /// Coordinates initiators and synchronizers and runs the dependency graph.
 pub struct SyncEngine {
-    status_manager: Arc<dyn SyncStatusManager>,
+    status_manager: Arc<dyn SyncStatusStore>,
     callbacks: Arc<CallbackStore>,
     log_progress: fn(SyncHeight, SyncHeight) -> bool,
     initiators: Vec<Initiator>,
@@ -40,7 +48,7 @@ pub struct SyncEngine {
 impl SyncEngine {
     /// Creates a builder backed by `status_manager`.
     #[must_use]
-    pub fn builder(status_manager: Arc<dyn SyncStatusManager>) -> Builder {
+    pub fn builder(status_manager: Arc<dyn SyncStatusStore>) -> Builder {
         Builder::new(status_manager)
     }
 
@@ -159,7 +167,7 @@ impl RunHandle {
                         task.abort();
                     }
                 } else {
-                    log::warn!("[SYNC_ENGINE] additional task join failure: {error}");
+                    tracing::warn!("[SYNC_ENGINE] additional task join failure: {error}");
                 }
             }
         }

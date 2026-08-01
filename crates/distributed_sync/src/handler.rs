@@ -128,17 +128,17 @@ pub trait DistributedSyncHandler: Send + Sync + 'static {
 
     /// Returns the retry backoff used by distributed task attempts and the core
     /// engine.
-    fn sleep_on_error(&self) -> Duration {
+    fn retry_delay(&self) -> Duration {
         Duration::from_millis(200)
     }
 
-    /// Returns the minimum inclusive engine range length.
-    fn min_sync_range(&self) -> usize {
+    /// Returns the minimum number of heights included in one engine batch.
+    fn min_batch_size(&self) -> usize {
         1
     }
 
-    /// Returns the maximum inclusive engine range length.
-    fn max_sync_range(&self) -> usize {
+    /// Returns the maximum number of heights included in one engine batch.
+    fn max_batch_size(&self) -> usize {
         1
     }
 
@@ -148,8 +148,9 @@ pub trait DistributedSyncHandler: Send + Sync + 'static {
         Duration::from_secs(10)
     }
 
-    /// Allows the batch to report a height below the offered range.
-    fn allow_wrap(&self) -> bool {
+    /// Allows the batch to report a height below the offered range and restart
+    /// this synchronizer from that lower height.
+    fn allow_rewind(&self) -> bool {
         false
     }
 }

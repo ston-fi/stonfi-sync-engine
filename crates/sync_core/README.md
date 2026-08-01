@@ -2,7 +2,7 @@
 
 `stonfi_sync_core` is a small asynchronous engine for synchronizing ordered
 heights through a dependency graph. Initiators discover upstream progress,
-synchronizers process inclusive ranges, and status managers persist committed
+synchronizers process inclusive ranges, and status stores persist committed
 heights.
 
 It is the transport-independent package in the `stonfi-sync-engine` workspace
@@ -24,6 +24,10 @@ outside this crate; it belongs in a separate workspace package so the core
 engine remains independent of gRPC, protobuf code generation, and worker
 infrastructure.
 
+`SyncHeight` is a `u64`. Height `0` remains the initial no-progress sentinel,
+so consumers that need to process a chain's native height `0` must map their
+external coordinates into the engine's height domain.
+
 ## Installation
 
 The crate has not published a remote Git release yet and is not published to
@@ -36,7 +40,7 @@ stonfi_metrics = { version = "0.0.1", git = "https://github.com/ston-fi/stonfi-m
 ```
 
 The crate requires a Tokio runtime. Implement [`SyncInitiator`] for each source,
-[`SyncHandler`] for each processor, and [`SyncStatusManager`] for durable
+[`SyncHandler`] for each processor, and [`SyncStatusStore`] for durable
 progress. Wrap implementations with [`Initiator`] and [`Synchronizer`], connect
 their triggers through [`SyncEngine::builder`], and call [`SyncEngine::run`].
 
@@ -54,11 +58,11 @@ use std::future::Future;
 use std::sync::Arc;
 use stonfi_sync_core::{
     errors::SyncCoreResult,
-    sync_engine::{Initiator, SyncEngine, SyncStatusManager, Synchronizer},
+    sync_engine::{Initiator, SyncEngine, SyncStatusStore, Synchronizer},
 };
 
 async fn run_until<F>(
-    status_manager: Arc<dyn SyncStatusManager>,
+    status_store: Arc<dyn SyncStatusStore>,
     source: Initiator,
     processor: Synchronizer,
     shutdown: F,
@@ -66,8 +70,8 @@ async fn run_until<F>(
 where
     F: Future<Output = ()>,
 {
-    let engine = SyncEngine::builder(status_manager)
-        .add_sync(processor, &[&source])?
+    let engine = SyncEngine::builder(status_store)
+        .add_synchronizer(processor, &[&source])?
         .add_initiator(source)?
         .build();
 
@@ -79,27 +83,18 @@ where
 
 ## Lifecycle and failure behavior
 
-- [`SyncEngine::run`] consumes the engine definition, so it cannot be started
-  twice.
-- [`RunHandle::shutdown`] signals cooperative shutdown and waits up to the
-  builder's configured shutdown timeout. It aborts remaining tasks and returns
-  an error when that timeout expires. Dropping the handle signals best-effort
-  shutdown without waiting.
-- Shutdown defaults to 30 seconds. Use [`Builder::with_shutdown_timeout`] to
-  set a service-specific bound.
-- When graceful shutdown exceeds that bound, the engine requests Tokio task
-  abortion and returns without waiting beyond it. Tokio applies abortion when a
-  task next yields; consumer code that never yields cannot be preempted.
-- [`RunHandle::wait`] waits for natural task completion without requesting
-  shutdown. Polling initiators normally require `shutdown()` instead.
-- Engine-owned trigger waits and retry sleeps observe shutdown promptly. An
-  in-progress consumer future is cooperative until the shutdown timeout, after
-  which its engine task is aborted.
-- Both `shutdown()` and `wait()` report task panics and cancellations. A task
-  failure cancels and aborts the remaining engine tasks so failure reporting
-  cannot be hidden behind a consumer future that never returns.
-- Handler, callback, and status-manager failures are retried with the owning
-  implementation's backoff.
+- [`SyncEngine::run`] consumes the engine and returns its only runtime owner.
+  [`RunHandle::shutdown`] requests cooperative shutdown, waits up to the
+  configured timeout, then aborts remaining tasks. Dropping the handle requests
+  best-effort shutdown without waiting.
+- Shutdown defaults to 30 seconds. Configure it with
+  [`Builder::with_shutdown_timeout`]. Consumer futures must yield for Tokio task
+  abortion to take effect.
+- [`RunHandle::wait`] observes natural completion without requesting shutdown.
+  Both lifecycle methods report task panics and cancellations and stop the
+  remaining tasks after a failure.
+- Handler, callback, and status-store failures are retried after the owning
+  implementation's `retry_delay()`.
 - Handler range delivery is at-least-once. A timed-out or failed
   `sync_range()` call is retried for the same range, so handler effects must be
   idempotent, cancellation-safe, or transactional.
@@ -109,35 +104,28 @@ where
   restart.
 - Returning `Ok(None)` from [`SyncHandler::sync_range`] defers that range until
   an upstream trigger advances again.
-- `allow_wrap()` permits a handler to publish a lower height for its own
-  synchronizer. An upstream decrease does not rewind a dependant or cancel
-  forward progress already selected by the dependant's active wait. Subsequent
-  waits observe current trigger values, and each dependant decides independently
-  whether its handler may wrap.
+- `allow_rewind()` permits a handler to publish a lower height. Upstream
+  decreases do not rewind dependants or cancel an active wait; later waits use
+  current trigger values.
 
 ## Public API
 
 Public items use module-qualified paths. Error types are under [`errors`], the
-in-memory status manager is under [`mem_status_manager`], and engine types and
+in-memory status implementation is under [`mem_status_manager`], and engine types and
 extension traits are under [`sync_engine`]. The main types are [`SyncEngine`],
 [`Builder`], [`Initiator`], [`Synchronizer`], [`RunHandle`], and
 [`MemStatusManager`]. Consumer-owned extension points are [`SyncInitiator`],
-[`SyncHandler`], [`SyncStatusManager`], [`SyncTrigger`], and [`SyncCallback`].
-Pass initiators and synchronizers by reference to `Builder::add_sync`; the
-builder clones their progress receivers before the owners are moved into it.
+[`SyncHandler`], [`SyncStatusStore`], [`SyncTrigger`], and [`SyncCallback`].
+Pass dependencies by reference to `Builder::add_synchronizer`; the builder
+clones their progress receivers before their owners are registered.
 
 Initiators and handlers are owned by one engine task and need only implement
 `Send + 'static`. `SyncHandler::sync_range` receives `&mut self`, so stateful
 implementations can update their own fields without internal locking. Status
-managers and callbacks are shared between tasks and therefore remain
+stores and callbacks are shared between tasks and therefore remain
 `Send + Sync + 'static`.
 
-### Migrating from the unpublished `v0.0.1` baseline
-
-Root-level re-exports and the `SyncID` alias have been removed. Import public
-items from their modules, keep owned IDs as `String` where needed, and return or
-pass them as `&str` at the engine boundary. Handler implementations must also
-change `sync_range(&self, ...)` to `sync_range(&mut self, ...)`.
+## Metrics
 
 Engine metrics use the default Prometheus registry and are registered with
 `stonfi_metrics` automatically. Applications must initialize the registered
@@ -155,10 +143,15 @@ Initialization is idempotent. Engine values never initialize or register
 collectors themselves; metric access before startup initialization panics by
 design.
 
+Height gauges use unsigned `u64` storage. Prometheus exposes numeric samples as
+`f64`, so scraped height values above `2^53` may lose unit precision; engine
+processing and `SyncStatusStore` persistence still retain the full `u64` value.
+
 ## Toolchain and features
 
 The crate uses Rust 2024 and supports Rust 1.93 and newer. It has no optional
-Cargo features.
+Cargo features. Diagnostics are emitted through `tracing`; applications install
+and configure their own subscriber.
 
 ## Validation
 
@@ -187,7 +180,7 @@ cargo package --list --locked -p stonfi_sync_core
 [`SyncHandler`]: crate::sync_engine::SyncHandler
 [`SyncHandler::sync_range`]: crate::sync_engine::SyncHandler::sync_range
 [`SyncInitiator`]: crate::sync_engine::SyncInitiator
-[`SyncStatusManager`]: crate::sync_engine::SyncStatusManager
+[`SyncStatusStore`]: crate::sync_engine::SyncStatusStore
 [`SyncTrigger`]: crate::sync_engine::SyncTrigger
 [`Synchronizer`]: crate::sync_engine::Synchronizer
 [`errors`]: crate::errors

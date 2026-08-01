@@ -4,6 +4,14 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+- Emit diagnostics through `tracing` while preserving message text and levels.
+- Use `u64` for `SyncHeight` while preserving height `0` as the initial
+  no-progress sentinel. Height gauges use unsigned storage; Prometheus
+  exposition may lose unit precision above `2^53` while engine and stored
+  heights retain full `u64` precision.
+- Use explicit synchronization names: `latest_height`, `min_batch_size`,
+  `max_batch_size`, `retry_delay`, `allow_rewind`, `processed_to`,
+  `Builder::add_synchronizer`, and `SyncStatusStore`.
 - Delegate metric-cell initialization exclusively to
   `stonfi_metrics::init_metrics!` and access registered collectors directly
   from metric helpers.
@@ -16,20 +24,4 @@ All notable changes to this project are documented in this file.
 - Bound cooperative engine shutdown and abort stuck consumer tasks after the
   configured timeout.
 - Reject empty and whitespace-padded sync IDs and support the maximum remaining
-  `u32` height range without intermediate overflow.
-
-## 0.0.1 (unpublished baseline)
-
-- Import the dependency-aware synchronization engine into its public repository.
-- Give running engines explicit cooperative shutdown ownership through
-  `RunHandle` and one engine-owned cancellation signal, including awaited
-  shutdown and task failure reporting.
-- Clarify process-local callback retries and independent synchronizer wrap
-  behavior.
-- Establish module-qualified public paths, replace `SyncID` with borrowed
-  `&str` boundaries, and let task-owned initiators and mutable handlers require
-  only `Send`.
-- Migrate engine metrics to `stonfi_metrics` v0.0.1 while preserving their names and semantics.
-- Place the package under `crates/sync_core` in a virtual workspace prepared
-  for the future separate `crates/distributed_sync` package.
-- Add strict public-library validation and Git-only GitHub release automation.
+  `SyncHeight` range without intermediate overflow.

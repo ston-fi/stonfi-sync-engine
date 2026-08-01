@@ -79,24 +79,24 @@ impl SyncHandler for DistributedSynchronizer {
         self.handler.is_enabled()
     }
 
-    fn sleep_on_error(&self) -> Duration {
-        self.handler.sleep_on_error()
+    fn retry_delay(&self) -> Duration {
+        self.handler.retry_delay()
     }
 
-    fn min_sync_range(&self) -> usize {
-        self.handler.min_sync_range()
+    fn min_batch_size(&self) -> usize {
+        self.handler.min_batch_size()
     }
 
-    fn max_sync_range(&self) -> usize {
-        self.handler.max_sync_range()
+    fn max_batch_size(&self) -> usize {
+        self.handler.max_batch_size()
     }
 
     fn sync_timeout(&self) -> Duration {
         self.handler.sync_timeout()
     }
 
-    fn allow_wrap(&self) -> bool {
-        self.handler.allow_wrap()
+    fn allow_rewind(&self) -> bool {
+        self.handler.allow_rewind()
     }
 }
 
@@ -118,11 +118,11 @@ pub(crate) trait ErasedHandler: Send + Sync {
     fn task_priority(&self) -> TaskPriority;
     fn is_service_task(&self) -> bool;
     fn is_enabled(&self) -> bool;
-    fn sleep_on_error(&self) -> Duration;
-    fn min_sync_range(&self) -> usize;
-    fn max_sync_range(&self) -> usize;
+    fn retry_delay(&self) -> Duration;
+    fn min_batch_size(&self) -> usize;
+    fn max_batch_size(&self) -> usize;
     fn sync_timeout(&self) -> Duration;
-    fn allow_wrap(&self) -> bool;
+    fn allow_rewind(&self) -> bool;
 }
 
 #[async_trait::async_trait]
@@ -183,23 +183,23 @@ where
         DistributedSyncHandler::is_enabled(self)
     }
 
-    fn sleep_on_error(&self) -> Duration {
-        DistributedSyncHandler::sleep_on_error(self)
+    fn retry_delay(&self) -> Duration {
+        DistributedSyncHandler::retry_delay(self)
     }
 
-    fn min_sync_range(&self) -> usize {
-        DistributedSyncHandler::min_sync_range(self)
+    fn min_batch_size(&self) -> usize {
+        DistributedSyncHandler::min_batch_size(self)
     }
 
-    fn max_sync_range(&self) -> usize {
-        DistributedSyncHandler::max_sync_range(self)
+    fn max_batch_size(&self) -> usize {
+        DistributedSyncHandler::max_batch_size(self)
     }
 
     fn sync_timeout(&self) -> Duration {
         DistributedSyncHandler::sync_timeout(self)
     }
 
-    fn allow_wrap(&self) -> bool {
-        DistributedSyncHandler::allow_wrap(self)
+    fn allow_rewind(&self) -> bool {
+        DistributedSyncHandler::allow_rewind(self)
     }
 }

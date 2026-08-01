@@ -40,6 +40,10 @@ transport-generated protobuf types private. `TaskBatch` owns ordered tasks and
 the height committed after successful result handling. Empty batches are valid.
 `RangeTask` has public fields as an intentional passive serialization contract;
 types with invariants should keep fields private.
+Library diagnostics use `tracing`; applications own subscriber configuration.
+Height-bearing APIs use the core `u64` `SyncHeight` domain and preserve `0` as
+the initial no-progress sentinel. Handler retry and range controls use
+`retry_delay`, `min_batch_size`, `max_batch_size`, and `allow_rewind`.
 
 Create the shared `Coordinator` explicitly, then pass it to
 `TaskServer::builder` and `DistributedSynchronizer::new`. Builders live in
@@ -62,13 +66,11 @@ stonfi_sync_core = { git = "https://github.com/ston-fi/stonfi-sync-engine", rev 
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 ```
 
-Initialize `stonfi_metrics`, create one shared `Coordinator` and handler `Arc`,
-build and run `TaskServer`, build and run `Worker`, then place
-`DistributedSynchronizer` inside the core `Synchronizer`. Pass source owners by
-reference when registering synchronizer dependencies, then move those owners
-into the builder. Retain every run handle and shut the core engine down before
-the worker and server. Keep the README doctest and `examples/distributed.rs` as
-the canonical integration references.
+Initialize `stonfi_metrics`, create the shared coordinator and handler, start
+the server and workers, and register `DistributedSynchronizer` with the core
+engine. Retain every run handle and shut down the core engine before workers and
+the server. The README doctest and `examples/distributed.rs` are the canonical
+integration references.
 
 ## Delivery, ordering, and lifecycle invariants
 
@@ -105,9 +107,8 @@ the canonical integration references.
 
 The protobuf package is `stonfi.distributed_sync.v1`. It contains only poll and
 complete RPCs. Poll requests carry worker identity, timeout, and service-task
-support, but no handler capability list. Coordinator and worker must be
-upgraded together. The protocol is intentionally incompatible with Tongrid's
-former handshake, timestamps, forwarding, reflection, and payload envelope.
+support, but no handler capability list. Coordinator and worker must use
+compatible revisions.
 
 Changing an RPC path, field number, outcome shape, task codec, default timeout,
 delivery guarantee, result ordering, or service-task rule is a behavioral and

@@ -29,7 +29,7 @@ impl MultiReceiver {
                 return None;
             }
             let Some(min_height) = cur_values.iter().copied().min() else {
-                log::warn!("[MULTI_RECEIVER] no receivers available while waiting for progress");
+                tracing::warn!("[MULTI_RECEIVER] no receivers available while waiting for progress");
                 return None;
             };
             if min_height > after {
@@ -51,7 +51,7 @@ impl MultiReceiver {
                 Some(Some((idx, val))) => cur_values[idx] = val,
                 Some(None) => return None, // receiver closed
                 None => {
-                    log::warn!("[MULTI_RECEIVER] no blocking receivers left while progress is still pending");
+                    tracing::warn!("[MULTI_RECEIVER] no blocking receivers left while progress is still pending");
                     return None;
                 },
             }
@@ -101,16 +101,16 @@ mod tests {
 
     #[tokio::test]
     async fn changed_parent_does_not_rewind_an_active_wait() -> anyhow::Result<()> {
-        let (wrapped_tx, wrapped_rx) = watch::channel(20);
+        let (rewound_tx, rewound_rx) = watch::channel(20);
         let (blocking_tx, blocking_rx) = watch::channel(10);
-        let mut multi_receiver = MultiReceiver::new(vec![wrapped_rx, blocking_rx])?;
+        let mut multi_receiver = MultiReceiver::new(vec![rewound_rx, blocking_rx])?;
 
         {
             let current_wait = multi_receiver.wait_after(10);
             futures::pin_mut!(current_wait);
             assert!(futures::poll!(&mut current_wait).is_pending());
 
-            wrapped_tx.send(0)?;
+            rewound_tx.send(0)?;
             blocking_tx.send(11)?;
             assert_eq!(Some(11), current_wait.await);
         }
@@ -122,7 +122,7 @@ mod tests {
 
             blocking_tx.send(12)?;
             assert!(futures::poll!(&mut next_wait).is_pending());
-            wrapped_tx.send(12)?;
+            rewound_tx.send(12)?;
             assert_eq!(Some(12), next_wait.await);
         }
         Ok(())

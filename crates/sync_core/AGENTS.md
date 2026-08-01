@@ -12,15 +12,14 @@ ordered heights:
 
 - `SyncInitiator` discovers upstream progress.
 - `SyncHandler` processes bounded inclusive ranges.
-- `SyncStatusManager` persists committed progress.
+- `SyncStatusStore` persists committed progress.
 - `SyncTrigger` connects initiators and synchronizers into a dependency graph.
 - `SyncCallback` observes lifecycle events.
 
 The crate does not provide distributed locking, multi-writer conflict
-resolution, storage, a Tokio runtime, or distributed task transport. Add the
-planned distributed implementation as a separate workspace package under
-`crates/distributed_sync`; do not add gRPC, protobuf, task-server, or worker
-dependencies to the core package or hide that surface behind a core feature.
+resolution, storage, a Tokio runtime, or distributed task transport. Those
+transport concerns belong to the sibling `crates/distributed_sync` package; do
+not add gRPC, protobuf, server, or worker dependencies to the core package.
 
 ## Public API and ownership
 
@@ -35,7 +34,7 @@ implementable.
 Public ID boundaries use `&str`; store IDs privately as `String` only where
 ownership is required. Initiators and handlers belong to one task and require
 `Send + 'static`, not `Sync`. `SyncHandler::sync_range` takes `&mut self` so
-stateful handlers do not need internal synchronization. Status managers and
+stateful handlers do not need internal synchronization. Status stores and
 callbacks are shared across tasks and require `Send + Sync + 'static`.
 
 Prefer `SyncEngine::builder`, add synchronizers with references to their
@@ -49,8 +48,9 @@ every task can finish naturally.
 Consumers use the Git dependency documented in `README.md`. The crate requires
 a running Tokio runtime before `SyncEngine::run` is called and returns typed
 `SyncCoreError` values for configuration and consumer failures.
-`SyncEngine::builder` is infallible because it only stores the status manager;
-keep `Builder::add_sync` and `Builder::add_initiator` fallible because
+Library diagnostics use `tracing`; applications own subscriber configuration.
+`SyncEngine::builder` is infallible because it only stores the status store;
+keep `Builder::add_synchronizer` and `Builder::add_initiator` fallible because
 validation happens when each entity is registered.
 
 Engine metrics are private global collectors registered through
@@ -61,22 +61,26 @@ access the registered cells directly and therefore panic if startup skipped
 initialization. Do not initialize individual metric cells from engine
 constructors, add redundant availability checks, reintroduce per-engine
 collector APIs, or expose Prometheus types publicly.
+Height gauges store `u64`, but Prometheus exposition converts numeric samples
+to `f64` and may lose unit precision above `2^53`; this does not narrow the
+engine or status-store height domain.
 
 ## Invariants and pitfalls
 
 - Every initiator and synchronizer ID must be unique within one engine.
-- Only one active engine may write a given sync ID. The status-manager API is
+- Only one active engine may write a given sync ID. The status-store API is
   not compare-and-set storage.
-- Range limits are positive, fit in `SyncHeight`, and satisfy `min <= max`.
+- `SyncHeight` is `u64`; height `0` remains the initial no-progress sentinel.
+- Batch sizes are positive, fit in `SyncHeight`, and satisfy `min <= max`.
 - `sync_range(from, to)` processes an inclusive range and may report only a
-  height in that range unless `allow_wrap()` is enabled.
+  height in that range unless `allow_rewind()` is enabled.
 - Returning `Ok(None)` defers progress; it does not commit or publish a height.
 - Callback failures are retried only while the engine is active. Callbacks must
   be idempotent because earlier callbacks may replay; delivery is not durable
   across shutdown or restart.
 - An upstream trigger decrease does not rewind dependants or cancel progress
-  selected by an active wait. Each handler controls its own wrap behavior
-  through `allow_wrap()`; subsequent waits use current trigger values.
+  selected by an active wait. Each handler controls its own rewind behavior
+  through `allow_rewind()`; subsequent waits use current trigger values.
 - Retry loops are cooperative. Consumer futures must return or enforce their
   own timeout if bounded shutdown latency is required.
 - Do not add parallel builders, aliases, convenience re-exports, or alternate

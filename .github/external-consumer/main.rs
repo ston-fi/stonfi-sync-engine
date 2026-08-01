@@ -15,7 +15,7 @@ impl SyncInitiator for Source {
         "external-source"
     }
 
-    async fn last_height(&mut self, after: SyncHeight) -> SyncCoreResult<SyncHeight> {
+    async fn latest_height(&mut self, after: SyncHeight) -> SyncCoreResult<SyncHeight> {
         Ok(after)
     }
 }
@@ -42,7 +42,7 @@ fn main() -> SyncCoreResult<()> {
     let processor = Synchronizer::new(Processor);
     let _engine = SyncEngine::builder(Arc::new(MemStatusManager::new()))
         .with_shutdown_timeout(Duration::from_secs(1))?
-        .add_sync(processor, &[&source])?
+        .add_synchronizer(processor, &[&source])?
         .add_initiator(source)?
         .build();
 

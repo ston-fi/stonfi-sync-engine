@@ -1,12 +1,12 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use env_logger::Env;
 use stonfi_sync_core::errors::SyncCoreResult;
 use stonfi_sync_core::mem_status_manager::MemStatusManager;
 use stonfi_sync_core::sync_engine::{
-    Initiator, SyncCallback, SyncEngine, SyncHandler, SyncHeight, SyncInitiator, SyncStatusManager, Synchronizer,
+    Initiator, SyncCallback, SyncEngine, SyncHandler, SyncHeight, SyncInitiator, SyncStatusStore, Synchronizer,
 };
+use tracing_subscriber::EnvFilter;
 
 // A toy initiator that reveals a fixed target height one step at a time.
 // In production this would usually poll a chain node, queue, or external API.
@@ -21,11 +21,11 @@ impl SyncInitiator for ExampleInitiator {
         self.id
     }
 
-    fn sleep_on_error(&self) -> Duration {
+    fn retry_delay(&self) -> Duration {
         Duration::from_millis(50)
     }
 
-    async fn last_height(&mut self, after: SyncHeight) -> SyncCoreResult<SyncHeight> {
+    async fn latest_height(&mut self, after: SyncHeight) -> SyncCoreResult<SyncHeight> {
         tokio::time::sleep(Duration::from_millis(20)).await;
         Ok(std::cmp::min(after.saturating_add(1), self.max_height))
     }
@@ -49,12 +49,12 @@ impl SyncHandler for ExampleHandler {
     }
 
     async fn sync_range(&mut self, from: SyncHeight, to: SyncHeight) -> SyncCoreResult<Option<SyncHeight>> {
-        log::info!("handler {} processed range [{from}, {to}]", self.id);
+        tracing::info!("handler {} processed range [{from}, {to}]", self.id);
         tokio::time::sleep(Duration::from_millis(30)).await;
         Ok(Some(to))
     }
 
-    fn max_sync_range(&self) -> usize {
+    fn max_batch_size(&self) -> usize {
         2
     }
 }
@@ -74,12 +74,12 @@ impl SyncCallback for ExampleCallback {
         if next_height <= prev_height {
             return Ok(());
         }
-        log::info!("callback: initiator {sync_id} advanced from {prev_height} to {next_height}");
+        tracing::info!("callback: initiator {sync_id} advanced from {prev_height} to {next_height}");
         Ok(())
     }
 
     async fn on_sync_start(&self, sync_id: &str, from: SyncHeight, to: SyncHeight) -> SyncCoreResult<()> {
-        log::info!("callback: sync {sync_id} started range [{from}, {to}]");
+        tracing::info!("callback: sync {sync_id} started range [{from}, {to}]");
         Ok(())
     }
 
@@ -88,16 +88,17 @@ impl SyncCallback for ExampleCallback {
         sync_id: &str,
         from: SyncHeight,
         to: SyncHeight,
-        real_to: SyncHeight,
+        processed_to: SyncHeight,
     ) -> SyncCoreResult<()> {
-        log::info!("callback: sync {sync_id} finished requested [{from}, {to}] and committed {real_to}");
+        tracing::info!("callback: sync {sync_id} finished requested [{from}, {to}] and committed {processed_to}");
         Ok(())
     }
 }
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> anyhow::Result<()> {
-    env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    tracing_subscriber::fmt().with_env_filter(filter).init();
     stonfi_metrics::init_metrics!()?;
 
     // `MemStatusManager` keeps synced heights in memory. It is useful for tests,
@@ -118,7 +119,7 @@ async fn main() -> anyhow::Result<()> {
     // Passing `&initiator` makes the synchronizer depend on its progress. The
     // builder clones the progress receiver before taking ownership below.
     let engine = SyncEngine::builder(status_manager.clone())
-        .add_sync(synchronizer, &[&initiator])?
+        .add_synchronizer(synchronizer, &[&initiator])?
         .add_initiator(initiator)?
         .add_callback(Arc::new(ExampleCallback))
         .build();
@@ -135,8 +136,8 @@ async fn main() -> anyhow::Result<()> {
     run_handle.shutdown().await?;
 
     let final_height = status_manager.load_synced_height("example_sync").await?;
-    log::info!("final synced height: {}", final_height.unwrap_or_default());
-    log::info!("swap the toy initiator/handler with real implementations to build your service.");
+    tracing::info!("final synced height: {}", final_height.unwrap_or_default());
+    tracing::info!("swap the toy initiator/handler with real implementations to build your service.");
 
     Ok(())
 }

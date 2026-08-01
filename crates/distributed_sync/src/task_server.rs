@@ -84,7 +84,7 @@ impl TaskServer {
             #[cfg(test)]
             poll_observer: self.poll_observer,
         });
-        log::info!("[DISTRIBUTED_SYNC][SERVER] listening on {}", self.local_address);
+        tracing::info!("[DISTRIBUTED_SYNC][SERVER] listening on {}", self.local_address);
         Server::builder()
             .add_service(service)
             .serve_with_incoming_shutdown(TcpListenerStream::new(self.listener), cancellation.cancelled_owned())

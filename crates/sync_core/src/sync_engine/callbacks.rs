@@ -60,10 +60,10 @@ impl SyncCallback for CallbackStore {
         sync_id: &str,
         from: SyncHeight,
         to: SyncHeight,
-        real_to: SyncHeight,
+        processed_to: SyncHeight,
     ) -> SyncCoreResult<()> {
         for callback in &self.callbacks {
-            callback.on_sync_complete(sync_id, from, to, real_to).await?;
+            callback.on_sync_complete(sync_id, from, to, processed_to).await?;
         }
         Ok(())
     }

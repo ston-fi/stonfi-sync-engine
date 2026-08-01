@@ -7,9 +7,15 @@ accepts every ordered result.
 
 The crate is currently unreleased and distributed from the
 [`stonfi-sync-engine`](https://github.com/ston-fi/stonfi-sync-engine) Git
-repository. It requires Rust 1.93 or newer and a Tokio runtime. During local
-development, depend on both workspace packages from the same revision. A
-downstream application using the example below needs these dependencies:
+repository. It requires Rust 1.93 or newer and a Tokio runtime.
+Diagnostics are emitted through `tracing`; applications install and configure
+their own subscriber.
+
+Height-bearing APIs use the core `u64` `SyncHeight` domain. Height `0` remains
+the core engine's initial no-progress sentinel.
+
+During local development, depend on both workspace packages from the same
+revision:
 
 ```toml
 [dependencies]
@@ -23,102 +29,53 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 
 ## Runtime model
 
-Implement
-[`DistributedSyncHandler`](crate::handler::DistributedSyncHandler), wrap the
-same `Arc` in a
-[`DistributedSynchronizer`](crate::synchronizer::DistributedSynchronizer) for
-the coordinator, and register it with a [`Worker`](crate::worker::Worker) in
-each worker process that can execute it.
+Implement [`DistributedSyncHandler`](crate::handler::DistributedSyncHandler),
+use the same `Arc` for the core adapter and workers, and retain every lifecycle
+handle:
 
 ```no_run
-use std::num::NonZeroUsize;
+use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::Duration;
-use stonfi_distributed_sync::handler::{
-    DistributedSyncHandler, TaskBatch,
-};
+use stonfi_distributed_sync::handler::DistributedSyncHandler;
 use stonfi_distributed_sync::synchronizer::DistributedSynchronizer;
-use stonfi_distributed_sync::task::{EmptyTaskResult, RangeTask};
 use stonfi_distributed_sync::coordinator::Coordinator;
-use stonfi_distributed_sync::task_server::TaskServer;
-use stonfi_distributed_sync::worker::Worker;
-use stonfi_sync_core::errors::SyncCoreResult;
-use stonfi_sync_core::sync_engine::{SyncHeight, Synchronizer};
+use stonfi_distributed_sync::task_server::{TaskServer, TaskServerRunHandle};
+use stonfi_distributed_sync::worker::{Worker, WorkerRunHandle};
+use stonfi_sync_core::sync_engine::Synchronizer;
 
-struct RangeHandler;
+async fn build_runtime<H>(
+    handler: Arc<H>,
+    listen_address: SocketAddr,
+) -> anyhow::Result<(Synchronizer, WorkerRunHandle, TaskServerRunHandle)>
+where
+    H: DistributedSyncHandler,
+{
+    stonfi_metrics::init_metrics!()?;
+    let coordinator = Coordinator::new();
+    let synchronizer = Synchronizer::new(DistributedSynchronizer::new(
+        handler.clone(),
+        coordinator.clone(),
+    )?);
 
-#[async_trait::async_trait]
-impl DistributedSyncHandler for RangeHandler {
-    type Task = RangeTask;
-    type TaskResult = EmptyTaskResult;
+    let server = TaskServer::builder(coordinator)
+        .with_listen_address(listen_address)
+        .build()
+        .await?;
+    let endpoint = format!("http://{}", server.local_address());
+    let worker = Worker::builder(endpoint)
+        .add_handler(handler)?
+        .build()?;
 
-    fn id(&self) -> &str {
-        "range"
-    }
-
-    fn initial_synced_height(&self) -> SyncHeight {
-        0
-    }
-
-    async fn create_tasks(
-        &self,
-        from: SyncHeight,
-        to: SyncHeight,
-    ) -> SyncCoreResult<Option<TaskBatch<Self::Task>>> {
-        Ok(Some(TaskBatch::new(to, vec![RangeTask { from, to }])))
-    }
-
-    async fn process_task(
-        &self,
-        _task: Self::Task,
-    ) -> SyncCoreResult<Self::TaskResult> {
-        Ok(EmptyTaskResult)
-    }
-
-    fn sync_timeout(&self) -> Duration {
-        Duration::from_secs(5)
-    }
+    Ok((synchronizer, worker.run(), server.run()))
 }
-
-# #[tokio::main]
-# async fn main() -> anyhow::Result<()> {
-stonfi_metrics::init_metrics!()?;
-
-let coordinator = Coordinator::new();
-let handler = Arc::new(RangeHandler);
-let distributed = DistributedSynchronizer::new(
-    handler.clone(),
-    coordinator.clone(),
-)?;
-let _core_synchronizer = Synchronizer::new(distributed);
-
-let server = TaskServer::builder(coordinator)
-    .with_listen_address("127.0.0.1:0".parse()?)
-    .build()
-    .await?;
-let endpoint = format!("http://{}", server.local_address());
-let server_handle = server.run();
-
-let parallelism = NonZeroUsize::new(2)
-    .ok_or_else(|| anyhow::anyhow!("parallelism must be positive"))?;
-let worker = Worker::builder(endpoint)
-    .with_parallelism(parallelism)
-    .with_service_tasks_enabled(true)
-    .add_handler(handler)?
-    .build()?;
-let worker_handle = worker.run();
-
-worker_handle.shutdown().await?;
-server_handle.shutdown().await?;
-# Ok(())
-# }
 ```
 
 Workers use [`std::thread::available_parallelism`] by default. Call
 `with_parallelism` only when the application needs an explicit limit.
 
-The complete runnable example in `examples/distributed.rs` also wires the
-adapter into a `stonfi_sync_core::SyncEngine`.
+Register the returned `Synchronizer` with `stonfi_sync_core::SyncEngine`. On
+shutdown, stop the core engine before the worker and server. See
+[`examples/distributed.rs`](examples/distributed.rs) for the complete workflow.
 
 ## Delivery and ordering
 
@@ -137,7 +94,7 @@ adapter into a `stonfi_sync_core::SyncEngine`.
   retryable failure.
 - A service task waits for exclusive access to that worker's configured task
   capacity. Idle long-polls do not consume processing capacity.
-- Failed worker attempts wait for the handler's `sleep_on_error()` backoff
+- Failed worker attempts wait for the handler's `retry_delay()` backoff
   before retrying. Task creation, queueing, worker capacity waits, and
   processing share the enclosing synchronization deadline.
 
@@ -167,8 +124,7 @@ startup initialization panics by design. Worker IDs are not metric labels.
 - The protocol has no authentication, TLS, forwarding, or persistent transport.
   Deploy it only on a trusted network or behind infrastructure that supplies
   those controls.
-- This protocol is a clean break from Tongrid's original `distributed_sync`;
-  old and new coordinator/worker processes cannot interoperate.
+- Coordinator and worker processes must use compatible crate revisions.
 - The crate does not provide distributed locking or multi-writer status
   coordination. The `stonfi_sync_core` single-writer rule still applies.
 - Task payload compatibility is owned by each handler's
