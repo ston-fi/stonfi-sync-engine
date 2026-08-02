@@ -81,7 +81,9 @@ integration references.
 - Tasks in one batch run concurrently, while `handle_results` receives results
   in task-creation order.
 - Task IDs identify one attempt. A retry receives a new ID; late completion of
-  an expired attempt is rejected.
+  an expired attempt is rejected. One synchronization range submits at most
+  10,000 coordinator tasks concurrently; later tasks retain result order and
+  the original batch deadline.
 - Except for service-task eligibility, every worker may receive any task. A
   worker without the assigned handler reports a retryable failure; do not add
   handler capability routing or handler-indexed queues.
@@ -109,8 +111,12 @@ integration references.
 
 The protobuf package is `stonfi.distributed_sync.v1`. It contains only poll and
 complete RPCs. Poll requests carry worker identity, timeout, and service-task
-support, but no handler capability list. Coordinator and worker must use
-compatible revisions.
+support, but no handler capability list. Assignments carry the coordinator's
+absolute Unix deadline in milliseconds; workers compare it directly with their
+local system clock and must not replace it with a fresh timeout. Coordinator and
+worker hosts therefore require synchronized clocks. This protocol has not been
+released, so the current `v1` contract does not need a compatibility bridge for
+its former relative-timeout field.
 
 Changing an RPC path, field number, outcome shape, task codec, default timeout,
 delivery guarantee, result ordering, or service-task rule is a behavioral and

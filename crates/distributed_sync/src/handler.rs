@@ -37,6 +37,8 @@ impl<T> TaskBatch<T> {
     ///
     /// An empty task list is valid and advances after
     /// [`DistributedSyncHandler::handle_results`] accepts an empty result list.
+    /// At most 10,000 tasks from one list are submitted concurrently while
+    /// preserving this vector's result order.
     pub fn new(synced_height: SyncHeight, tasks: Vec<T>) -> Self {
         Self { synced_height, tasks }
     }

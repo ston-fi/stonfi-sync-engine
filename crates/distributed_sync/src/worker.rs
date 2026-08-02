@@ -5,7 +5,7 @@ mod metrics;
 use crate::proto::complete_request::Outcome;
 use crate::proto::{CompleteRequest, TaskAssignment};
 use crate::synchronizer::ErasedHandler;
-use crate::utils::timeout_deadline;
+use crate::utils::deadline_from_unix_millis;
 use builder::Builder;
 use futures::stream::{FuturesUnordered, StreamExt};
 use grpc_client::GrpcClient;
@@ -168,45 +168,9 @@ async fn run_loop(inner: Arc<Inner>, cancellation: CancellationToken) {
             let handler_id = assignment.handler_id.clone();
             let started_at = Instant::now();
             WorkerMetrics::task(&handler_id, WorkerTaskStatus::Received, Duration::ZERO);
-            let processing_timeout = Duration::from_millis(assignment.timeout_ms);
-            let (completion, permit) = match timeout_deadline(processing_timeout, "assignment processing timeout") {
-                Ok(processing_deadline) => {
-                    match processing_permit(&inner, &assignment, &cancellation, processing_deadline).await {
-                        ProcessingPermit::Acquired(permit) => (
-                            process_assignment(&inner, assignment, started_at, processing_deadline, processing_timeout)
-                                .await,
-                            Some(permit),
-                        ),
-                        ProcessingPermit::TimedOut => {
-                            WorkerMetrics::task(&handler_id, WorkerTaskStatus::TimedOut, started_at.elapsed());
-                            (
-                                completion_request(
-                                    &inner.worker_id,
-                                    assignment.assignment_id,
-                                    Outcome::ErrorMessage(format!(
-                                        "assignment {} timed out waiting for processing capacity after {processing_timeout:.3?}",
-                                        assignment.assignment_id
-                                    )),
-                                ),
-                                None,
-                            )
-                        },
-                        ProcessingPermit::Stopped => return,
-                    }
-                },
-                Err(error) => {
-                    WorkerMetrics::task(&handler_id, WorkerTaskStatus::Failed, started_at.elapsed());
-                    (
-                        completion_request(
-                            &inner.worker_id,
-                            assignment.assignment_id,
-                            Outcome::ErrorMessage(error.to_string()),
-                        ),
-                        None,
-                    )
-                },
+            let Some(completion) = task_completion(&inner, assignment, &cancellation, started_at).await else {
+                return;
             };
-            drop(permit);
 
             if let Err(error) = client.complete(completion).await {
                 WorkerMetrics::task(&handler_id, WorkerTaskStatus::CompletionFailed, started_at.elapsed());
@@ -215,6 +179,45 @@ async fn run_loop(inner: Arc<Inner>, cancellation: CancellationToken) {
             }
         }
     }
+}
+
+async fn task_completion(
+    inner: &Inner,
+    assignment: TaskAssignment,
+    cancellation: &CancellationToken,
+    started_at: Instant,
+) -> Option<CompleteRequest> {
+    let handler_id = &assignment.handler_id;
+    let task_deadline = match deadline_from_unix_millis(assignment.deadline_unix_ms, "task deadline") {
+        Ok(task_deadline) => task_deadline,
+        Err(error) => {
+            WorkerMetrics::task(handler_id, WorkerTaskStatus::TimedOut, started_at.elapsed());
+            return Some(completion_request(
+                &inner.worker_id,
+                assignment.assignment_id,
+                Outcome::ErrorMessage(error.to_string()),
+            ));
+        },
+    };
+
+    let _permit = match processing_permit(inner, &assignment, cancellation, task_deadline).await {
+        ProcessingPermit::Acquired(permit) => permit,
+        ProcessingPermit::TimedOut => {
+            WorkerMetrics::task(handler_id, WorkerTaskStatus::TimedOut, started_at.elapsed());
+            return Some(completion_request(
+                &inner.worker_id,
+                assignment.assignment_id,
+                Outcome::ErrorMessage(format!(
+                    "assignment {} timed out waiting for processing capacity",
+                    assignment.assignment_id
+                )),
+            ));
+        },
+        ProcessingPermit::Stopped => return None,
+    };
+
+    let completion = process_assignment(inner, assignment, started_at, task_deadline).await;
+    Some(completion)
 }
 
 async fn connect(inner: &Inner, cancellation: &CancellationToken) -> Option<GrpcClient> {
@@ -247,13 +250,13 @@ async fn processing_permit(
     inner: &Inner,
     assignment: &TaskAssignment,
     cancellation: &CancellationToken,
-    deadline: tokio::time::Instant,
+    task_deadline: tokio::time::Instant,
 ) -> ProcessingPermit {
     let permits = if assignment.service_task { inner.parallelism } else { 1 };
     tokio::select! {
         biased;
         _ = cancellation.cancelled() => ProcessingPermit::Stopped,
-        permit = tokio::time::timeout_at(deadline, inner.active_tasks.clone().acquire_many_owned(permits)) => {
+        permit = tokio::time::timeout_at(task_deadline, inner.active_tasks.clone().acquire_many_owned(permits)) => {
             match permit {
                 Ok(Ok(permit)) => ProcessingPermit::Acquired(permit),
                 Ok(Err(error)) => {
@@ -276,11 +279,10 @@ async fn process_assignment(
     inner: &Inner,
     assignment: TaskAssignment,
     started_at: Instant,
-    deadline: tokio::time::Instant,
-    timeout: Duration,
+    task_deadline: tokio::time::Instant,
 ) -> CompleteRequest {
     let handler_id = assignment.handler_id.clone();
-    let outcome = process_outcome(inner, &assignment, &handler_id, started_at, deadline, timeout).await;
+    let outcome = process_outcome(inner, &assignment, &handler_id, started_at, task_deadline).await;
 
     completion_request(&inner.worker_id, assignment.assignment_id, outcome)
 }
@@ -298,15 +300,14 @@ async fn process_outcome(
     assignment: &TaskAssignment,
     handler_id: &str,
     started_at: Instant,
-    deadline: tokio::time::Instant,
-    timeout: Duration,
+    task_deadline: tokio::time::Instant,
 ) -> Outcome {
     let Some(handler) = inner.handlers.get(handler_id) else {
         WorkerMetrics::task(handler_id, WorkerTaskStatus::Failed, started_at.elapsed());
         return Outcome::ErrorMessage(format!("worker has no handler '{handler_id}'"));
     };
 
-    match tokio::time::timeout_at(deadline, handler.process_task_bytes(&assignment.payload)).await {
+    match tokio::time::timeout_at(task_deadline, handler.process_task_bytes(&assignment.payload)).await {
         Ok(Ok(payload)) => {
             WorkerMetrics::task(handler_id, WorkerTaskStatus::Processed, started_at.elapsed());
             Outcome::ResultPayload(payload)
@@ -317,24 +318,25 @@ async fn process_outcome(
         },
         Err(_) => {
             WorkerMetrics::task(handler_id, WorkerTaskStatus::TimedOut, started_at.elapsed());
-            Outcome::ErrorMessage(format!("assignment {} timed out after {timeout:.3?}", assignment.assignment_id))
+            Outcome::ErrorMessage(format!("assignment {} reached its deadline", assignment.assignment_id))
         },
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Inner, ProcessingPermit, Worker, process_outcome, processing_permit};
+    use super::{Inner, ProcessingPermit, Worker, process_outcome, processing_permit, task_completion};
     use crate::coordinator::Coordinator;
     use crate::handler::{DistributedSyncHandler, TaskBatch};
     use crate::proto::TaskAssignment;
     use crate::proto::complete_request::Outcome;
-    use crate::synchronizer::DistributedSynchronizer;
+    use crate::synchronizer::{DistributedSynchronizer, ErasedHandler};
     use crate::task::{EmptyTaskResult, RangeTask};
     use crate::task_server::{PollObserver, TaskServer};
     use std::collections::HashMap;
     use std::num::NonZeroUsize;
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
     use stonfi_sync_core::errors::SyncCoreResult;
     use stonfi_sync_core::sync_engine::{SyncHandler, SyncHeight};
@@ -345,6 +347,33 @@ mod tests {
     struct TestHandler {
         id: &'static str,
         service_task: bool,
+    }
+
+    struct DeadlineHandler {
+        process_calls: AtomicUsize,
+    }
+
+    #[async_trait::async_trait]
+    impl DistributedSyncHandler for DeadlineHandler {
+        type Task = RangeTask;
+        type TaskResult = EmptyTaskResult;
+
+        fn id(&self) -> &str {
+            "absolute-deadline"
+        }
+
+        async fn create_tasks(
+            &self,
+            from: SyncHeight,
+            to: SyncHeight,
+        ) -> SyncCoreResult<Option<TaskBatch<Self::Task>>> {
+            Ok(Some(TaskBatch::new(to, vec![RangeTask { from, to }])))
+        }
+
+        async fn process_task(&self, _task: Self::Task) -> SyncCoreResult<Self::TaskResult> {
+            self.process_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(EmptyTaskResult)
+        }
     }
 
     #[async_trait::async_trait]
@@ -435,7 +464,7 @@ mod tests {
             assignment_id: 1,
             handler_id: "unregistered".to_owned(),
             payload: Vec::new(),
-            timeout_ms: 100,
+            deadline_unix_ms: crate::utils::deadline_unix_millis(Duration::from_millis(100), "test deadline")?,
             service_task: false,
         };
 
@@ -446,7 +475,6 @@ mod tests {
             "unregistered",
             std::time::Instant::now(),
             tokio::time::Instant::now() + timeout,
-            timeout,
         )
         .await;
         match outcome {
@@ -475,7 +503,7 @@ mod tests {
             assignment_id: 1,
             handler_id: "test".to_owned(),
             payload: Vec::new(),
-            timeout_ms: 10,
+            deadline_unix_ms: crate::utils::deadline_unix_millis(Duration::from_millis(10), "test deadline")?,
             service_task: false,
         };
 
@@ -488,6 +516,47 @@ mod tests {
         .await;
         assert!(matches!(result, ProcessingPermit::TimedOut));
         drop(active_permit);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_expired_absolute_deadline_reports_failure_without_processing() -> anyhow::Result<()> {
+        stonfi_metrics::init_metrics!()?;
+        let handler = Arc::new(DeadlineHandler {
+            process_calls: AtomicUsize::new(0),
+        });
+        let mut handlers = HashMap::new();
+        let erased_handler: Arc<dyn ErasedHandler> = handler.clone();
+        let handler_id = DistributedSyncHandler::id(handler.as_ref()).to_owned();
+        handlers.insert(handler_id.clone(), erased_handler);
+        let inner = Inner {
+            worker_id: "test-worker".to_owned(),
+            endpoint: Endpoint::from_static("http://127.0.0.1:1"),
+            service_tasks_enabled: false,
+            polling_timeout: Duration::from_secs(1),
+            reconnect_delay: Duration::from_secs(1),
+            shutdown_timeout: Duration::from_secs(1),
+            parallelism: 1,
+            active_tasks: Arc::new(Semaphore::new(1)),
+            handlers,
+        };
+        let completion = task_completion(
+            &inner,
+            TaskAssignment {
+                assignment_id: 1,
+                handler_id,
+                payload: Vec::new(),
+                deadline_unix_ms: 1,
+                service_task: false,
+            },
+            &CancellationToken::new(),
+            std::time::Instant::now(),
+        )
+        .await
+        .ok_or_else(|| anyhow::anyhow!("expired task should produce a completion"))?;
+
+        assert!(matches!(completion.outcome, Some(Outcome::ErrorMessage(_))));
+        assert_eq!(handler.process_calls.load(Ordering::SeqCst), 0);
         Ok(())
     }
 }

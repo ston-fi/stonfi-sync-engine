@@ -1,11 +1,13 @@
-use crate::coordinator::{Coordinator, TaskPriority};
+use crate::coordinator::{Coordinator, TaskDeadline, TaskPriority};
 use crate::handler::{DistributedSyncHandler, TaskPayload};
-use crate::utils::{timeout_deadline, validate_timeout_millis};
-use futures::future::try_join_all;
+use crate::utils::validate_timeout_millis;
+use futures::stream::{self, StreamExt, TryStreamExt};
 use std::sync::Arc;
 use std::time::Duration;
 use stonfi_sync_core::errors::SyncCoreResult;
 use stonfi_sync_core::sync_engine::{SyncHandler, SyncHeight};
+
+const MAX_ONGOING_TASKS: usize = 10_000;
 
 /// Adapts a [`DistributedSyncHandler`] to `stonfi_sync_core`.
 #[derive(Clone)]
@@ -41,15 +43,18 @@ impl SyncHandler for DistributedSynchronizer {
 
     async fn sync_range(&mut self, from: SyncHeight, to: SyncHeight) -> SyncCoreResult<Option<SyncHeight>> {
         let batch_timeout = self.handler.sync_timeout();
-        let batch_deadline = timeout_deadline(batch_timeout, "distributed batch timeout")?;
+        let task_deadline = TaskDeadline::new(batch_timeout)?;
         let Some((synced_height, payloads)) = self.handler.create_tasks_bytes(from, to).await? else {
             return Ok(None);
         };
 
-        let result_payloads = try_join_all(payloads.into_iter().map(|payload| {
-            self.coordinator
-                .handle_task(self.handler.clone(), payload, batch_deadline, batch_timeout)
-        }))
+        let result_payloads = stream::iter(
+            payloads
+                .into_iter()
+                .map(|payload| self.coordinator.handle_task(self.handler.clone(), payload, task_deadline)),
+        )
+        .buffered(MAX_ONGOING_TASKS)
+        .try_collect()
         .await?;
 
         self.handler.handle_results_bytes(synced_height, result_payloads).await?;
@@ -177,5 +182,92 @@ where
 
     fn allow_rewind(&self) -> bool {
         DistributedSyncHandler::allow_rewind(self)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{DistributedSynchronizer, MAX_ONGOING_TASKS};
+    use crate::coordinator::Coordinator;
+    use crate::handler::{DistributedSyncHandler, TaskBatch};
+    use crate::proto::CompleteRequest;
+    use crate::proto::complete_request::Outcome;
+    use crate::task::{EmptyTaskResult, RangeTask};
+    use std::collections::VecDeque;
+    use std::sync::Arc;
+    use std::time::Duration;
+    use stonfi_sync_core::errors::SyncCoreResult;
+    use stonfi_sync_core::sync_engine::{SyncHandler, SyncHeight};
+
+    struct LargeBatchHandler;
+
+    #[async_trait::async_trait]
+    impl DistributedSyncHandler for LargeBatchHandler {
+        type Task = RangeTask;
+        type TaskResult = EmptyTaskResult;
+
+        fn id(&self) -> &str {
+            "large-batch"
+        }
+
+        async fn create_tasks(
+            &self,
+            from: SyncHeight,
+            to: SyncHeight,
+        ) -> SyncCoreResult<Option<TaskBatch<Self::Task>>> {
+            Ok(Some(TaskBatch::new(to, vec![RangeTask { from, to }; MAX_ONGOING_TASKS + 1])))
+        }
+
+        async fn process_task(&self, _task: Self::Task) -> SyncCoreResult<Self::TaskResult> {
+            Ok(EmptyTaskResult)
+        }
+
+        fn sync_timeout(&self) -> Duration {
+            Duration::from_secs(30)
+        }
+    }
+
+    #[tokio::test]
+    async fn test_large_batch_limits_coordinator_ongoing_tasks() -> anyhow::Result<()> {
+        stonfi_metrics::init_metrics!()?;
+        let coordinator = Coordinator::new();
+        let mut synchronizer = DistributedSynchronizer::new(Arc::new(LargeBatchHandler), coordinator.clone())?;
+        let sync_task = tokio::spawn(async move { synchronizer.sync_range(1, 1).await });
+
+        let mut assignments = VecDeque::with_capacity(MAX_ONGOING_TASKS);
+        for _ in 0..MAX_ONGOING_TASKS {
+            assignments.push_back(
+                coordinator
+                    .poll(Duration::from_secs(1), false)
+                    .await?
+                    .ok_or_else(|| anyhow::anyhow!("expected a buffered assignment"))?,
+            );
+        }
+        assert!(coordinator.poll(Duration::from_millis(10), false).await?.is_none());
+
+        let first = assignments
+            .pop_front()
+            .ok_or_else(|| anyhow::anyhow!("expected the first buffered assignment"))?;
+        complete_assignment(&coordinator, first.assignment_id)?;
+        let final_assignment = coordinator
+            .poll(Duration::from_secs(1), false)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("expected the final buffered assignment"))?;
+
+        for assignment in assignments {
+            complete_assignment(&coordinator, assignment.assignment_id)?;
+        }
+        complete_assignment(&coordinator, final_assignment.assignment_id)?;
+
+        assert_eq!(sync_task.await??, Some(1));
+        Ok(())
+    }
+
+    fn complete_assignment(coordinator: &Coordinator, assignment_id: u64) -> SyncCoreResult<()> {
+        coordinator.complete(CompleteRequest {
+            worker_id: "test-worker".to_owned(),
+            assignment_id,
+            outcome: Some(Outcome::ResultPayload(Vec::new())),
+        })
     }
 }

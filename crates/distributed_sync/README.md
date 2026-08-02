@@ -99,6 +99,9 @@ handlers define task behavior only.
 - Failed worker attempts wait for the handler's `retry_delay()` backoff
   before retrying. Task creation, queueing, worker capacity waits, and
   processing share the enclosing synchronization deadline.
+- One synchronization range keeps at most 10,000 coordinator task futures in
+  flight. New tasks are admitted as earlier tasks finish, while the original
+  deadline and task-creation result order are preserved.
 
 ## Lifecycle
 
@@ -126,7 +129,12 @@ startup initialization panics by design. Worker IDs are not metric labels.
 - The protocol has no authentication, TLS, forwarding, or persistent transport.
   Deploy it only on a trusted network or behind infrastructure that supplies
   those controls.
-- Coordinator and worker processes must use compatible crate revisions.
+- The unreleased wire contract remains `stonfi.distributed_sync.v1` and carries
+  absolute Unix task deadlines. Coordinator and worker processes must use
+  compatible crate revisions.
+- Coordinator and worker hosts must keep their system clocks synchronized. Task
+  assignments carry the coordinator's absolute Unix deadline, which workers
+  compare directly with their local clocks.
 - The crate does not provide distributed locking or multi-writer status
   coordination. The `stonfi_sync_core` single-writer rule still applies.
 - Task payload compatibility is owned by each handler's

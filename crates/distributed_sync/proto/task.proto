@@ -21,7 +21,7 @@ message TaskAssignment {
   uint64 assignment_id = 1;
   string handler_id = 2;
   bytes payload = 3;
-  uint64 timeout_ms = 4;
+  uint64 deadline_unix_ms = 4;
   bool service_task = 5;
 }
 
