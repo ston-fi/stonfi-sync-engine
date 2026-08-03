@@ -67,7 +67,7 @@ mod tests {
             assignment_id: id,
             handler_id: "test".to_owned(),
             payload: Vec::new(),
-            timeout_ms: 1,
+            deadline_unix_ms: 1,
             service_task,
         }
     }

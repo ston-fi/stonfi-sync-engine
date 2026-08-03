@@ -37,4 +37,4 @@ sed \
   > "$consumer_dir/Cargo.toml"
 cp "$repository_root/.github/external-consumer/main.rs" "$consumer_dir/src/main.rs"
 
-cargo +1.93.0 check --manifest-path "$consumer_dir/Cargo.toml"
+cargo +1.95.0 check --manifest-path "$consumer_dir/Cargo.toml"

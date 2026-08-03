@@ -3,160 +3,120 @@ use crate::sync_engine::SyncHeight;
 use crate::sync_engine::progress::ProgressReceiver;
 use std::time::Duration;
 
-/// Status-store ID reserved for the engine-wide initial synced height.
-pub const INITIAL_SYNC_ID: &str = "INITIAL";
+/// Reserved initial-height key in the handler ID namespace.
+pub const INITIAL_HEIGHT: &str = "INITIAL_HEIGHT";
 
-/// Loads the latest available height for dependent synchronizers.
+/// Loads the latest upstream height.
 ///
-/// `id()` must be stable for the lifetime of the engine and unique among all
-/// registered height providers and synchronizers that share metrics labels.
+/// IDs must be stable and unique across registered handlers.
 #[rustfmt::skip]
 #[async_trait::async_trait]
 pub trait HeightLoader: Send + 'static {
-    /// Returns the stable identifier used in logs and metrics.
+    /// Returns the stable handler ID.
     fn id(&self) -> &str;
-    /// Returns the delay used after `latest_height()` makes no progress or
-    /// after loader or callback failures.
+    /// Returns the delay after no progress or a loader or callback failure.
     fn retry_delay(&self) -> Duration { Duration::from_millis(200) }
-    /// Returns the latest known height relative to `after`.
-    ///
-    /// Returning a height less than or equal to `after` is allowed, but the
-    /// engine will treat it as "no progress", sleep for `retry_delay()`,
-    /// and poll again.
+    /// Returns the latest height; values not above `after` mean no progress.
     async fn latest_height(&mut self, after: SyncHeight) -> SyncCoreResult<SyncHeight>;
 }
 
-/// Processes a contiguous inclusive range of heights.
-///
-/// Called by the engine when its dependency wait admits new progress.
+/// Processes inclusive height ranges.
 #[rustfmt::skip]
 #[async_trait::async_trait]
 pub trait SyncHandler: Send + 'static {
-    /// Returns the stable identifier used in logs, metrics, and status storage.
+    /// Returns the stable handler ID.
     fn id(&self) -> &str;
     /// Processes the inclusive range `[from, to]`.
     ///
-    /// The engine guarantees `from <= to` and, when the method is called,
-    /// `min_batch_size() <= (to - from + 1) <= max_batch_size()`.
+    /// The range and batch size are valid. `Ok(None)` ignores the range without
+    /// persistence or publication. `Ok(Some(height))` commits a height in the
+    /// range, or a lower height when [`Self::allow_rewind`] is enabled.
     ///
-    /// Return `Ok(None)` to explicitly ignore the offered range. The engine
-    /// will skip persistence, completion callbacks, and downstream progress
-    /// publication for that range.
-    ///
-    /// Return `Ok(Some(height))` to report the highest height durably processed
-    /// by the handler. `height` must be within `[from, to]`, except when
-    /// `allow_rewind()` is enabled, in which case returning
-    /// `Some(height < from)` restarts this synchronizer from the lower height.
-    ///
-    /// Calls are at-least-once. The engine cancels this future when
-    /// [`Self::sync_timeout`] elapses and retries the same range after errors or
-    /// timeouts. Implementations must make externally visible effects
-    /// idempotent, cancellation-safe, or transactional.
+    /// Calls are at-least-once and cancelled at [`Self::sync_timeout`]; effects
+    /// must therefore be idempotent, cancellation-safe, or transactional.
     async fn sync_range(&mut self, from: SyncHeight, to: SyncHeight) -> SyncCoreResult<Option<SyncHeight>>;
 
-    /// Returns whether the handler is currently allowed to process new ranges.
+    /// Returns whether new ranges may be processed.
     fn is_enabled(&self) -> bool { true }
-    /// Returns the delay used after handler, callback, or status-store
-    /// failures associated with this synchronizer.
+    /// Returns the retry delay for this handler and related operations.
     fn retry_delay(&self) -> Duration { Duration::from_millis(200) }
-    /// Returns the minimum number of heights the handler can process per call.
+    /// Returns the minimum batch size.
     fn min_batch_size(&self) -> usize { 1 }
-    /// Returns the maximum number of heights the handler can process per call.
+    /// Returns the maximum batch size.
     fn max_batch_size(&self) -> usize { 1 }
-    /// Returns the timeout for a single `sync_range()` call.
+    /// Returns the timeout for [`Self::sync_range`].
     fn sync_timeout(&self) -> Duration { Duration::from_secs(10) }
-    /// Allows [`Self::sync_range`] to return `Some(height < from)` to restart
-    /// processing from that lower height without treating it as an error.
+    /// Allows [`Self::sync_range`] to rewind below `from`.
     fn allow_rewind(&self) -> bool { false }
 }
 
-/// Stores synced heights and supplies the engine-wide initial fallback.
+/// Persists handler progress and owns the initial-height fallback.
 ///
-/// Only one active engine may write an ID, including [`INITIAL_SYNC_ID`]; this
-/// trait does not provide compare-and-set coordination.
+/// Only one engine may write each handler ID or [`INITIAL_HEIGHT`] key.
 #[rustfmt::skip]
 #[async_trait::async_trait]
 pub trait SyncStatusStore: Send + Sync + 'static {
-    /// Returns the configured fallback used to initialize [`INITIAL_SYNC_ID`].
+    /// Returns the fallback stored under [`INITIAL_HEIGHT`].
     fn initial_synced_height(&self) -> SyncHeight;
-    /// Stores the latest durably synced height for `sync_id`.
-    async fn save_synced_height(&self, sync_id: &str, sync_height: SyncHeight) -> SyncCoreResult<()>;
-    /// Loads the latest persisted synced height for `sync_id`.
+    /// Stores the latest synced height for `handler_id`.
+    async fn save_synced_height(&self, handler_id: &str, sync_height: SyncHeight) -> SyncCoreResult<()>;
+    /// Loads the persisted height for `handler_id`.
+    async fn load_synced_height(&self, handler_id: &str) -> SyncCoreResult<Option<SyncHeight>>;
+    /// Loads `handler_id`, falling back to [`INITIAL_HEIGHT`].
     ///
-    /// Returns `Ok(None)` when the sync has not been persisted yet.
-    async fn load_synced_height(&self, sync_id: &str) -> SyncCoreResult<Option<SyncHeight>>;
-    /// Loads `sync_id`, falling back to [`INITIAL_SYNC_ID`].
-    ///
-    /// If neither exists, stores and returns [`Self::initial_synced_height`].
+    /// Initializes [`INITIAL_HEIGHT`] from [`Self::initial_synced_height`] when
+    /// neither key exists.
     ///
     /// # Errors
     ///
-    /// Returns an error when loading or initializing status storage fails.
-    async fn load_synced_or_initial(&self, sync_id: &str) -> SyncCoreResult<SyncHeight> {
-        if let Some(sync_height) = self.load_synced_height(sync_id).await? {
+    /// Returns an error when storage access fails.
+    async fn load_synced_or_initial(&self, handler_id: &str) -> SyncCoreResult<SyncHeight> {
+        if let Some(sync_height) = self.load_synced_height(handler_id).await? {
             return Ok(sync_height);
         }
-        if let Some(initial_synced_height) = self.load_synced_height(INITIAL_SYNC_ID).await? {
+        if let Some(initial_synced_height) = self.load_synced_height(INITIAL_HEIGHT).await? {
             return Ok(initial_synced_height);
         }
 
         let initial_synced_height = self.initial_synced_height();
-        self.save_synced_height(INITIAL_SYNC_ID, initial_synced_height).await?;
+        self.save_synced_height(INITIAL_HEIGHT, initial_synced_height).await?;
         Ok(initial_synced_height)
     }
 }
 
-/// Provides progress subscriptions for dependent synchronizers.
+/// Provides progress subscriptions.
 pub trait ProgressProvider {
     /// Subscribes to the provider's latest published height.
     ///
-    /// Each call returns an independent watch receiver initialized with the
-    /// provider's current value. Receivers observe the latest value and may
-    /// coalesce intermediate publications.
-    ///
-    /// Progress values may decrease when an upstream synchronizer rewinds. A
-    /// decrease does not rewind dependants or cancel forward progress already
-    /// selected by an active dependency wait. Each dependant decides whether
-    /// to rewind through its own [`SyncHandler::allow_rewind`] behavior. Subsequent
-    /// waits observe the provider's current value.
+    /// Receivers start at the current value and may coalesce updates. Upstream
+    /// rewinds affect subsequent waits but do not cancel already selected work.
     fn subscribe(&self) -> ProgressReceiver;
 }
 
 /// Receives notifications about engine progress and failures.
 ///
-/// The builder does not deduplicate callback instances. The engine retries
-/// callback failures with the same backoff as the owning height provider or handler
-/// while the engine remains active. Callbacks must be idempotent because, when
-/// several callbacks are registered, a later callback failure can replay
-/// earlier ones. Delivery is not persisted and is not guaranteed across
-/// shutdown, process failure, or restart.
+/// Failures retry while the engine is active. Earlier callbacks may replay, so
+/// implementations must be idempotent. Delivery is process-local.
 ///
-/// `component_id` identifies the height provider or synchronizer that emitted
-/// the event.
+/// `handler_id` identifies the height loader or sync handler that emitted the
+/// event.
 #[rustfmt::skip]
 #[async_trait::async_trait]
 pub trait SyncCallback: Send + Sync + 'static {
     /// Called when `HeightLoader::latest_height()` returns an error.
     /// `height` is the last height passed to it as `after`.
-    async fn on_height_load_error(&self, _component_id: &str, _height: SyncHeight) -> SyncCoreResult<()> { Ok(()) }
-    /// Called after every successful height load, including the initial
-    /// `latest_height(0)` result.
-    async fn on_height_loaded(&self, _component_id: &str, _prev_height: SyncHeight, _loaded_height: SyncHeight) -> SyncCoreResult<()> { Ok(()) }
-    /// Called after every nonzero height publication, including initial
-    /// progress published with `prev_height == 0`.
-    async fn on_height_published(&self, _component_id: &str, _prev_height: SyncHeight, _published_height: SyncHeight) -> SyncCoreResult<()> { Ok(()) }
-    /// Called before a synchronizer starts processing the inclusive range
-    /// `[from, to]`.
-    async fn on_sync_start(&self, _component_id: &str, _from: SyncHeight, _to: SyncHeight) -> SyncCoreResult<()> { Ok(()) }
-    /// Called after `sync_range()` fails, times out, or returns an invalid
-    /// height.
-    async fn on_sync_error(&self, _component_id: &str, _from: SyncHeight, _to: SyncHeight) -> SyncCoreResult<()> { Ok(()) }
+    async fn on_height_load_error(&self, _handler_id: &str, _height: SyncHeight) -> SyncCoreResult<()> { Ok(()) }
+    /// Called after each successful height load, including the initial load.
+    async fn on_height_loaded(&self, _handler_id: &str, _prev_height: SyncHeight, _loaded_height: SyncHeight) -> SyncCoreResult<()> { Ok(()) }
+    /// Called after each nonzero height publication.
+    async fn on_height_published(&self, _handler_id: &str, _prev_height: SyncHeight, _published_height: SyncHeight) -> SyncCoreResult<()> { Ok(()) }
+    /// Called before processing `[from, to]`.
+    async fn on_sync_start(&self, _handler_id: &str, _from: SyncHeight, _to: SyncHeight) -> SyncCoreResult<()> { Ok(()) }
+    /// Called after a range fails, times out, or returns an invalid height.
+    async fn on_sync_error(&self, _handler_id: &str, _from: SyncHeight, _to: SyncHeight) -> SyncCoreResult<()> { Ok(()) }
     /// Called after the synchronizer saves the new synced height.
     ///
-    /// `to` is the offered range bound; `processed_to` is the height returned by
-    /// the handler and committed by the engine.
-    ///
-    /// A callback failure does not roll back the saved height. Retries are
-    /// process-local and stop when the engine shuts down.
-    async fn on_sync_complete(&self, _component_id: &str, _from: SyncHeight, _to: SyncHeight, _processed_to: SyncHeight) -> SyncCoreResult<()> { Ok(()) }
+    /// `to` is the offered bound and `processed_to` is the committed height.
+    /// Callback failure does not roll back the saved height.
+    async fn on_sync_complete(&self, _handler_id: &str, _from: SyncHeight, _to: SyncHeight, _processed_to: SyncHeight) -> SyncCoreResult<()> { Ok(()) }
 }

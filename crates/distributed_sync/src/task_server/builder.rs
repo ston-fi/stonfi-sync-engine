@@ -45,8 +45,7 @@ impl Builder {
     ///
     /// # Errors
     ///
-    /// Returns an error when the listen address is missing, the shutdown
-    /// timeout is invalid, or the socket cannot be bound or inspected.
+    /// Returns an error for a missing address, invalid timeout, or socket error.
     ///
     /// # Panics
     ///

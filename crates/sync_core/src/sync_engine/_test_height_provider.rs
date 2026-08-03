@@ -32,8 +32,8 @@ async fn test_initial_loaded_height_is_published() -> anyhow::Result<()> {
         id: "fixed_initial_height".to_string(),
     }
     .into();
-    let sync_id = "sync_initial_publish".to_string();
-    let sync = TestSync::new(&sync_id, 0).into();
+    let id = "sync_initial_publish".to_string();
+    let sync = TestSync::new(&id, 0).into();
     let engine = SyncEngine::builder(status_store.clone())
         .add_synchronizer(sync, &[&height_provider])?
         .add_height_provider(height_provider)?
@@ -41,7 +41,7 @@ async fn test_initial_loaded_height_is_published() -> anyhow::Result<()> {
 
     let run_handle = engine.run();
     tokio::time::timeout(Duration::from_millis(500), async {
-        while status_store.load_synced_height(&sync_id).await? != Some(7) {
+        while status_store.load_synced_height(&id).await? != Some(7) {
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
         Ok::<(), SyncCoreError>(())
@@ -89,13 +89,13 @@ struct InitialCallback {
 impl SyncCallback for InitialCallback {
     async fn on_height_loaded(
         &self,
-        component_id: &str,
+        handler_id: &str,
         previous_height: SyncHeight,
         loaded_height: SyncHeight,
     ) -> SyncCoreResult<()> {
         self.events
             .lock()
-            .push(InitialEvent::Loaded(component_id.to_owned(), previous_height, loaded_height));
+            .push(InitialEvent::Loaded(handler_id.to_owned(), previous_height, loaded_height));
         if loaded_height == 0 {
             self.done.notify_one();
         }
@@ -104,12 +104,12 @@ impl SyncCallback for InitialCallback {
 
     async fn on_height_published(
         &self,
-        component_id: &str,
+        handler_id: &str,
         previous_height: SyncHeight,
         published_height: SyncHeight,
     ) -> SyncCoreResult<()> {
         self.events.lock().push(InitialEvent::Published(
-            component_id.to_owned(),
+            handler_id.to_owned(),
             previous_height,
             published_height,
         ));
@@ -176,11 +176,11 @@ struct RetryPublishedCallback {
 impl SyncCallback for RetryPublishedCallback {
     async fn on_height_published(
         &self,
-        component_id: &str,
+        handler_id: &str,
         previous_height: SyncHeight,
         published_height: SyncHeight,
     ) -> SyncCoreResult<()> {
-        assert_eq!("initial_callback_height", component_id);
+        assert_eq!("initial_callback_height", handler_id);
         assert_eq!((0, 7), (previous_height, published_height));
         if self.attempts.fetch_add(1, Ordering::SeqCst) == 0 {
             self.first_attempt.notify_one();

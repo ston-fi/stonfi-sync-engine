@@ -1,13 +1,9 @@
-use crate::handler::TaskPayload;
+use crate::traits::TaskPayload;
 use bincode::{Decode, Encode};
 use stonfi_sync_core::errors::{SyncCoreError, SyncCoreResult};
 use stonfi_sync_core::sync_engine::SyncHeight;
 
-/// A passive task describing an inclusive height range.
-///
-/// The public fields are an intentional serialization contract. Consumers that
-/// need a different task shape should implement [`TaskPayload`] on their own
-/// type.
+/// A serializable inclusive height range.
 #[derive(Debug, Clone, PartialEq, Eq, Encode, Decode)]
 pub struct RangeTask {
     /// First height in the inclusive range.
@@ -55,7 +51,7 @@ fn decode_exact<T: Decode<()>>(data: &[u8]) -> SyncCoreResult<T> {
 #[cfg(test)]
 mod tests {
     use super::{EmptyTaskResult, RangeTask};
-    use crate::handler::TaskPayload;
+    use crate::traits::TaskPayload;
     use stonfi_sync_core::sync_engine::SyncHeight;
 
     #[test]
