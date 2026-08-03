@@ -5,13 +5,4 @@ here.
 
 ## Unreleased
 
-## 0.1.0 - 2026-08-03
 
-- Add the initial public distributed synchronization package with an in-memory
-  coordinator, gRPC task server, workers, and one typed handler extension point.
-- Provide at-least-once task delivery, ordered batch results, priority/FIFO
-  queues, exclusive service tasks, bounded coordinator concurrency, and shared
-  absolute deadlines across retries and processing.
-- Add owned server and worker lifecycle handles with bounded shutdown.
-- Document the trusted-network boundary, versioned `v1` wire protocol,
-  idempotency requirements, metrics, and complete integration workflow.
