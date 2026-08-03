@@ -43,12 +43,12 @@ impl WorkerMetrics {
             tasks: prometheus::register_int_counter_vec!(
                 "stonfi_distributed_sync_worker_tasks_total",
                 "Distributed worker task outcomes",
-                &["sync_id", "status"],
+                &["handler_id", "status"],
             )?,
             task_duration_ms: prometheus::register_histogram_vec!(
                 "stonfi_distributed_sync_worker_task_duration_ms",
                 "Distributed worker task duration in milliseconds",
-                &["sync_id", "status"],
+                &["handler_id", "status"],
                 DURATION_BUCKETS_1MS_20S.clone(),
             )?,
         })
@@ -59,13 +59,13 @@ impl WorkerMetrics {
         METRICS.polls.with_label_values(&[outcome]).inc();
     }
 
-    pub(super) fn task(sync_id: &str, status: WorkerTaskStatus, duration: Duration) {
+    pub(super) fn task(id: &str, status: WorkerTaskStatus, duration: Duration) {
         let status: &'static str = status.into();
-        METRICS.tasks.with_label_values(&[sync_id, status]).inc();
+        METRICS.tasks.with_label_values(&[id, status]).inc();
         if !duration.is_zero() {
             METRICS
                 .task_duration_ms
-                .with_label_values(&[sync_id, status])
+                .with_label_values(&[id, status])
                 .observe(format_duration_ms(duration));
         }
     }

@@ -33,13 +33,8 @@ use tokio_util::sync::CancellationToken;
 
 /// Height unit tracked by the engine.
 ///
-/// Height `0` is reserved as the initial no-progress sentinel. Synchronizers
-/// therefore process chain heights starting from `1` unless a consumer maps a
-/// zero-based chain coordinate into this domain.
-///
-/// Prometheus exposes numeric samples as `f64`, so height metrics may lose unit
-/// precision above `2^53` even though engine processing and persistence retain
-/// the full `u64` value.
+/// `0` means no progress. Metrics may lose precision above `2^53`, while engine
+/// processing and persistence retain the full `u64` value.
 pub type SyncHeight = u64;
 
 /// Coordinates height providers and synchronizers and runs the dependency graph.
@@ -59,18 +54,11 @@ impl SyncEngine {
         Builder::new(status_store)
     }
 
-    /// Consumes the engine definition and starts every registered height
-    /// provider and synchronizer on the current Tokio runtime.
-    ///
-    /// The returned [`RunHandle`] owns the running tasks. Use
-    /// [`RunHandle::shutdown`] for bounded awaited shutdown or
-    /// [`RunHandle::wait`] to wait for the tasks to finish naturally.
+    /// Starts all registered handlers and returns their runtime owner.
     ///
     /// # Panics
     ///
-    /// Panics when called outside a Tokio runtime, following
-    /// [`tokio::spawn`] semantics. Spawned tasks also panic when application
-    /// startup has not called `stonfi_metrics::init_metrics!`.
+    /// Panics outside Tokio or when metrics were not initialized.
     pub fn run(self) -> RunHandle {
         let Self {
             status_store,
@@ -111,10 +99,9 @@ impl SyncEngine {
     }
 }
 
-/// Join handles for tasks spawned by [`SyncEngine::run`].
+/// Owns tasks spawned by [`SyncEngine::run`].
 ///
-/// Dropping this handle signals cooperative shutdown but does not wait for task
-/// completion. Use [`RunHandle::shutdown`] when completion must be confirmed.
+/// Dropping it requests shutdown without waiting.
 #[must_use = "dropping the run handle immediately requests engine shutdown"]
 pub struct RunHandle {
     cancellation: CancellationToken,
@@ -123,19 +110,12 @@ pub struct RunHandle {
 }
 
 impl RunHandle {
-    /// Signals cooperative shutdown and waits up to the configured timeout for
-    /// all spawned tasks to finish.
-    ///
-    /// Engine-owned progress waits and retry sleeps are interrupted. Active
-    /// consumer-provided futures remain cooperative until the configured
-    /// shutdown timeout, after which task abortion is requested and this method
-    /// returns without another unbounded join. Tokio applies abortion when a
-    /// task next yields and cannot preempt consumer code that never yields.
+    /// Requests shutdown, waits until the configured timeout, then aborts
+    /// remaining tasks. Consumer futures remain cooperative until they yield.
     ///
     /// # Errors
     ///
-    /// Returns an error if a spawned task panicked or was cancelled, or when
-    /// shutdown exceeds the timeout. Remaining tasks are aborted on timeout.
+    /// Returns an error on task failure or shutdown timeout.
     pub async fn shutdown(mut self) -> SyncCoreResult<()> {
         self.cancellation.cancel();
         let shutdown_timeout = self.shutdown_timeout;
@@ -152,15 +132,11 @@ impl RunHandle {
         }
     }
 
-    /// Waits for all spawned tasks to finish without requesting shutdown.
-    ///
-    /// This is useful when every progress provider can close naturally. Engines
-    /// with polling height providers normally require [`RunHandle::shutdown`]
-    /// instead.
+    /// Waits for natural completion without requesting shutdown.
     ///
     /// # Errors
     ///
-    /// Returns an error if a spawned task panicked or was cancelled.
+    /// Returns an error on task failure.
     pub async fn wait(mut self) -> SyncCoreResult<()> {
         self.join_tasks().await
     }
@@ -192,7 +168,6 @@ impl Drop for RunHandle {
 
 pub(super) async fn sleep_or_cancelled(cancellation: &CancellationToken, duration: Duration) -> bool {
     tokio::select! {
-        biased;
         _ = cancellation.cancelled() => true,
         _ = tokio::time::sleep(duration) => false,
     }

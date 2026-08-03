@@ -1,9 +1,13 @@
 mod metrics;
 mod queue;
+mod types;
 
+pub(crate) use types::TaskDeadline;
+pub use types::TaskPriority;
+
+use crate::distributed_adapter::ErasedHandler;
 use crate::proto::complete_request::Outcome;
 use crate::proto::{CompleteRequest, TaskAssignment};
-use crate::synchronizer::ErasedHandler;
 use crate::utils::timeout_deadline;
 use metrics::{CoordinatorMetrics, CoordinatorTaskStatus};
 use parking_lot::Mutex;
@@ -15,41 +19,16 @@ use std::time::{Duration, Instant};
 use stonfi_sync_core::errors::{SyncCoreError, SyncCoreResult};
 use tokio::sync::{Notify, oneshot};
 
-/// Relative dispatch priority for tasks waiting at the coordinator.
+/// Process-local task queues and in-flight assignments shared by all clones.
 ///
-/// Within the regular or service queue, higher-priority tasks are dispatched
-/// first and equal-priority tasks are dispatched in FIFO order. Service-capable
-/// workers select the service queue before the regular queue.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
-#[non_exhaustive]
-pub enum TaskPriority {
-    /// Lowest available priority.
-    Lowest,
-    /// Lower than normal priority.
-    Low,
-    /// Default priority.
-    #[default]
-    Normal,
-    /// Higher than normal priority.
-    High,
-    /// Highest available priority.
-    Highest,
-}
-
-/// In-memory coordinator that queues tasks and joins worker completions back to
-/// the waiting synchronization range.
-///
-/// Clones share the same queues and in-flight assignments. State is
-/// process-local and is not durable across restarts. This type does not own the
-/// task server, Tokio runtime, status persistence, or workers.
+/// The coordinator is not durable and does not own the server or workers.
 #[derive(Clone, Default)]
 pub struct Coordinator {
     inner: Arc<Inner>,
 }
 
 impl Coordinator {
-    /// Creates empty process-local coordination state.
-    ///
+    /// Creates empty coordination state.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
@@ -59,10 +38,9 @@ impl Coordinator {
         &self,
         handler: Arc<dyn ErasedHandler>,
         payload: Vec<u8>,
-        batch_deadline: tokio::time::Instant,
-        batch_timeout: Duration,
+        deadline: TaskDeadline,
     ) -> SyncCoreResult<Vec<u8>> {
-        self.inner.handle_task(handler, payload, batch_deadline, batch_timeout).await
+        self.inner.handle_task(handler, payload, deadline).await
     }
 
     pub(crate) async fn poll(
@@ -107,69 +85,57 @@ impl Inner {
         self: &Arc<Self>,
         handler: Arc<dyn ErasedHandler>,
         payload: Vec<u8>,
-        deadline: tokio::time::Instant,
-        timeout: Duration,
+        deadline: TaskDeadline,
     ) -> SyncCoreResult<Vec<u8>> {
         let started_at = Instant::now();
-        let handler_id = handler.id().to_owned();
+        let id = handler.id().to_owned();
 
         loop {
             let elapsed = started_at.elapsed();
-            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            let remaining = deadline.instant.saturating_duration_since(tokio::time::Instant::now());
             if remaining.is_zero() {
-                CoordinatorMetrics::complete(&handler_id, CoordinatorTaskStatus::TimedOut, elapsed);
+                CoordinatorMetrics::complete(&id, CoordinatorTaskStatus::TimedOut, elapsed);
                 return Err(SyncCoreError::net(format!(
-                    "distributed task for handler '{handler_id}' timed out after {timeout:.3?}"
+                    "distributed task for handler '{id}' reached its deadline"
                 )));
             }
 
             let assignment_id = self.next_assignment_id()?;
-            let timeout_ms = u64::try_from(remaining.as_millis())
-                .map_err(|_| SyncCoreError::invalid_args("distributed task timeout exceeds u64 milliseconds"))?;
-            if timeout_ms == 0 {
-                CoordinatorMetrics::complete(&handler_id, CoordinatorTaskStatus::TimedOut, elapsed);
-                return Err(SyncCoreError::net(format!(
-                    "distributed task for handler '{handler_id}' has less than one millisecond remaining"
-                )));
-            }
-
             let assignment = TaskAssignment {
                 assignment_id,
-                handler_id: handler_id.clone(),
+                handler_id: id.clone(),
                 payload: payload.clone(),
-                timeout_ms,
+                deadline_unix_ms: deadline.unix_ms,
                 service_task: handler.is_service_task(),
             };
-            let receiver = self.push(assignment, handler.task_priority(), deadline);
+            let receiver = self.push(assignment, handler.task_priority(), deadline.instant);
             let guard = AssignmentGuard::new(self.clone(), assignment_id);
-            CoordinatorMetrics::queued(&handler_id);
+            CoordinatorMetrics::queued(&id);
 
-            let completion = tokio::time::timeout_at(deadline, receiver).await;
+            let completion = tokio::time::timeout_at(deadline.instant, receiver).await;
             drop(guard);
 
             match completion {
                 Ok(Ok(Ok(result))) => {
-                    CoordinatorMetrics::complete(&handler_id, CoordinatorTaskStatus::Processed, started_at.elapsed());
+                    CoordinatorMetrics::complete(&id, CoordinatorTaskStatus::Processed, started_at.elapsed());
                     return Ok(result);
                 },
                 Ok(Ok(Err(error))) => {
-                    CoordinatorMetrics::complete(&handler_id, CoordinatorTaskStatus::Failed, started_at.elapsed());
-                    tracing::warn!(
-                        "[DISTRIBUTED_SYNC][{handler_id}] assignment {assignment_id} failed: {error}; retrying"
-                    );
-                    sleep_before_retry(handler.retry_delay(), deadline).await;
+                    CoordinatorMetrics::complete(&id, CoordinatorTaskStatus::Failed, started_at.elapsed());
+                    tracing::warn!("[DISTRIBUTED_SYNC][{id}] assignment {assignment_id} failed: {error}; retrying");
+                    sleep_before_retry(handler.retry_delay(), deadline.instant).await;
                 },
                 Ok(Err(error)) => {
-                    CoordinatorMetrics::complete(&handler_id, CoordinatorTaskStatus::Failed, started_at.elapsed());
+                    CoordinatorMetrics::complete(&id, CoordinatorTaskStatus::Failed, started_at.elapsed());
                     tracing::warn!(
-                        "[DISTRIBUTED_SYNC][{handler_id}] assignment {assignment_id} completion channel closed: {error}; retrying"
+                        "[DISTRIBUTED_SYNC][{id}] assignment {assignment_id} completion channel closed: {error}; retrying"
                     );
-                    sleep_before_retry(handler.retry_delay(), deadline).await;
+                    sleep_before_retry(handler.retry_delay(), deadline.instant).await;
                 },
                 Err(_) => {
-                    CoordinatorMetrics::complete(&handler_id, CoordinatorTaskStatus::TimedOut, started_at.elapsed());
+                    CoordinatorMetrics::complete(&id, CoordinatorTaskStatus::TimedOut, started_at.elapsed());
                     return Err(SyncCoreError::net(format!(
-                        "distributed task for handler '{handler_id}' timed out after {timeout:.3?}"
+                        "distributed task for handler '{id}' reached its deadline"
                     )));
                 },
             }
@@ -178,7 +144,7 @@ impl Inner {
 
     fn next_assignment_id(&self) -> SyncCoreResult<u64> {
         self.next_assignment_id
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| current.checked_add(1))
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |current| current.checked_add(1))
             .map(|previous| previous + 1)
             .map_err(|_| SyncCoreError::logic("distributed assignment ID space exhausted"))
     }
@@ -234,7 +200,7 @@ impl Inner {
         let (assignment, regular_size, service_size) = {
             let mut state = self.state.lock();
             let assignment = loop {
-                let Some(mut candidate) = state.queue.pop(service_tasks_enabled) else {
+                let Some(candidate) = state.queue.pop(service_tasks_enabled) else {
                     break None;
                 };
                 let Some(ongoing) = state.ongoing.get_mut(&candidate.assignment_id) else {
@@ -243,14 +209,10 @@ impl Inner {
                 if !ongoing.queued {
                     continue;
                 }
-                let remaining = ongoing.deadline.saturating_duration_since(tokio::time::Instant::now());
-                let timeout_ms = u64::try_from(remaining.as_millis())
-                    .map_err(|_| SyncCoreError::logic("remaining assignment timeout exceeds u64 milliseconds"))?;
-                if timeout_ms == 0 {
+                if ongoing.deadline <= tokio::time::Instant::now() {
                     continue;
                 }
                 ongoing.queued = false;
-                candidate.timeout_ms = timeout_ms;
                 break Some(candidate);
             };
             let (regular_size, service_size) = state.queue.sizes();
@@ -336,13 +298,13 @@ impl Drop for AssignmentGuard {
 
 #[cfg(test)]
 mod tests {
-    use super::Coordinator;
-    use crate::handler::{DistributedSyncHandler, TaskBatch};
+    use super::{Coordinator, TaskDeadline};
+    use crate::distributed_adapter::ErasedHandler;
     use crate::proto::CompleteRequest;
     use crate::proto::complete_request::Outcome;
-    use crate::synchronizer::ErasedHandler;
     use crate::task::{EmptyTaskResult, RangeTask};
     use crate::task_server::TaskServiceImpl;
+    use crate::traits::{DistributedHandler, TaskBatch};
     use std::sync::Arc;
     use std::time::Duration;
     use stonfi_sync_core::errors::SyncCoreResult;
@@ -356,7 +318,7 @@ mod tests {
     struct TestHandler(Duration);
 
     #[async_trait::async_trait]
-    impl DistributedSyncHandler for TestHandler {
+    impl DistributedHandler for TestHandler {
         type Task = RangeTask;
         type TaskResult = EmptyTaskResult;
 
@@ -376,12 +338,12 @@ mod tests {
             Ok(EmptyTaskResult)
         }
 
-        fn sync_timeout(&self) -> Duration {
-            self.0
-        }
-
         fn retry_delay(&self) -> Duration {
             Duration::from_millis(20)
+        }
+
+        fn sync_timeout(&self) -> Duration {
+            self.0
         }
     }
 
@@ -392,9 +354,8 @@ mod tests {
         let timeout = Duration::from_millis(100);
         let handler: Arc<dyn ErasedHandler> = Arc::new(TestHandler(timeout));
         let coordinator_for_task = coordinator.clone();
-        let deadline = tokio::time::Instant::now() + timeout;
-        let task =
-            tokio::spawn(async move { coordinator_for_task.handle_task(handler, vec![1], deadline, timeout).await });
+        let deadline = TaskDeadline::new(timeout)?;
+        let task = tokio::spawn(async move { coordinator_for_task.handle_task(handler, vec![1], deadline).await });
 
         let first = coordinator
             .poll(Duration::from_secs(1), false)
@@ -412,6 +373,7 @@ mod tests {
             .await?
             .ok_or_else(|| anyhow::anyhow!("retried assignment was not dispatched"))?;
         assert_ne!(first.assignment_id, second.assignment_id);
+        assert_eq!(first.deadline_unix_ms, second.deadline_unix_ms);
         coordinator.complete(CompleteRequest {
             worker_id: "worker".to_owned(),
             assignment_id: second.assignment_id,
@@ -429,9 +391,8 @@ mod tests {
         let timeout = Duration::from_millis(100);
         let handler: Arc<dyn ErasedHandler> = Arc::new(TestHandler(timeout));
         let coordinator_for_task = coordinator.clone();
-        let deadline = tokio::time::Instant::now() + timeout;
-        let task =
-            tokio::spawn(async move { coordinator_for_task.handle_task(handler, vec![1], deadline, timeout).await });
+        let deadline = TaskDeadline::new(timeout)?;
+        let task = tokio::spawn(async move { coordinator_for_task.handle_task(handler, vec![1], deadline).await });
 
         tokio::task::yield_now().await;
         task.abort();
@@ -469,9 +430,8 @@ mod tests {
         let timeout = Duration::from_millis(100);
         let handler: Arc<dyn ErasedHandler> = Arc::new(TestHandler(timeout));
         let coordinator_for_task = coordinator.clone();
-        let deadline = tokio::time::Instant::now() + timeout;
-        let task =
-            tokio::spawn(async move { coordinator_for_task.handle_task(handler, vec![1], deadline, timeout).await });
+        let deadline = TaskDeadline::new(timeout)?;
+        let task = tokio::spawn(async move { coordinator_for_task.handle_task(handler, vec![1], deadline).await });
 
         let assignment = coordinator
             .poll(Duration::from_secs(1), false)
@@ -492,15 +452,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_dispatch_recomputes_timeout_after_queue_delay() -> anyhow::Result<()> {
+    async fn test_dispatch_preserves_absolute_deadline_after_queue_delay() -> anyhow::Result<()> {
         init_test_metrics()?;
         let coordinator = Coordinator::new();
         let timeout = Duration::from_secs(2);
         let handler: Arc<dyn ErasedHandler> = Arc::new(TestHandler(timeout));
         let coordinator_for_task = coordinator.clone();
-        let deadline = tokio::time::Instant::now() + timeout;
-        let task =
-            tokio::spawn(async move { coordinator_for_task.handle_task(handler, vec![1], deadline, timeout).await });
+        let deadline = TaskDeadline::new(timeout)?;
+        let deadline_unix_ms = deadline.unix_ms;
+        let task = tokio::spawn(async move { coordinator_for_task.handle_task(handler, vec![1], deadline).await });
 
         while coordinator.queued_task_count() == 0 {
             tokio::task::yield_now().await;
@@ -511,7 +471,7 @@ mod tests {
             .await?
             .ok_or_else(|| anyhow::anyhow!("assignment was not dispatched"))?;
 
-        assert!(assignment.timeout_ms < 1_950);
+        assert_eq!(assignment.deadline_unix_ms, deadline_unix_ms);
         task.abort();
         let _ = task.await;
         Ok(())
