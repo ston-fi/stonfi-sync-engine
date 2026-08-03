@@ -129,7 +129,7 @@ impl Builder {
         let parallelism_u32 = u32::try_from(parallelism.get())
             .map_err(|_| SyncCoreError::invalid_args("worker parallelism exceeds u32"))?;
         let worker_counter = WORKER_COUNTER
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| current.checked_add(1))
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |current| current.checked_add(1))
             .map(|previous| previous + 1)
             .map_err(|_| SyncCoreError::logic("worker ID counter exhausted"))?;
 
