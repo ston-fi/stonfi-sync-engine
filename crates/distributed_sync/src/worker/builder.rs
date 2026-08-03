@@ -1,6 +1,6 @@
 use super::{Inner, Worker};
-use crate::handler::DistributedSyncHandler;
-use crate::synchronizer::ErasedHandler;
+use crate::distributed_adapter::ErasedHandler;
+use crate::traits::DistributedHandler;
 use crate::utils::{validate_timeout, validate_timeout_millis};
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
@@ -85,7 +85,7 @@ impl Builder {
     /// Returns an error when the handler ID is already registered.
     pub fn add_handler<H>(mut self, handler: Arc<H>) -> SyncCoreResult<Self>
     where
-        H: DistributedSyncHandler,
+        H: DistributedHandler,
     {
         let id = handler.id().to_owned();
         match self.handlers.entry(id.clone()) {

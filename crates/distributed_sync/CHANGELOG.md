@@ -4,9 +4,13 @@ All notable changes to `stonfi_distributed_sync` are documented here.
 
 ## Unreleased
 
+- Rename `handler::DistributedSyncHandler` to `traits::DistributedHandler` and
+  `synchronizer::DistributedSynchronizer` to
+  `distributed_adapter::DistributedAdapter`. Remove the unused `TaskBatch`
+  getters.
 - Update examples and integration coverage for the core `HeightLoader`,
   `HeightProvider`, and `ProgressProvider` API.
-- Remove initial-height configuration from `DistributedSyncHandler`; the core
+- Remove initial-height configuration from `DistributedHandler`; the core
   `SyncStatusStore` now owns and persists the engine-wide fallback.
 - Emit diagnostics through `tracing` while preserving message text and levels.
 - Use the core `u64` `SyncHeight` domain and the `retry_delay`, batch-size, and

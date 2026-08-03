@@ -2,9 +2,9 @@ mod builder;
 mod grpc_client;
 mod metrics;
 
+use crate::distributed_adapter::ErasedHandler;
 use crate::proto::complete_request::Outcome;
 use crate::proto::{CompleteRequest, TaskAssignment};
-use crate::synchronizer::ErasedHandler;
 use crate::utils::deadline_from_unix_millis;
 use builder::Builder;
 use futures::stream::{FuturesUnordered, StreamExt};
@@ -316,12 +316,12 @@ async fn process_outcome(
 mod tests {
     use super::{Inner, ProcessingPermit, Worker, process_outcome, processing_permit, task_completion};
     use crate::coordinator::Coordinator;
-    use crate::handler::{DistributedSyncHandler, TaskBatch};
+    use crate::distributed_adapter::{DistributedAdapter, ErasedHandler};
     use crate::proto::TaskAssignment;
     use crate::proto::complete_request::Outcome;
-    use crate::synchronizer::{DistributedSynchronizer, ErasedHandler};
     use crate::task::{EmptyTaskResult, RangeTask};
     use crate::task_server::{PollObserver, TaskServer};
+    use crate::traits::{DistributedHandler, TaskBatch};
     use std::collections::HashMap;
     use std::num::NonZeroUsize;
     use std::sync::Arc;
@@ -343,7 +343,7 @@ mod tests {
     }
 
     #[async_trait::async_trait]
-    impl DistributedSyncHandler for DeadlineHandler {
+    impl DistributedHandler for DeadlineHandler {
         type Task = RangeTask;
         type TaskResult = EmptyTaskResult;
 
@@ -366,7 +366,7 @@ mod tests {
     }
 
     #[async_trait::async_trait]
-    impl DistributedSyncHandler for TestHandler {
+    impl DistributedHandler for TestHandler {
         type Task = RangeTask;
         type TaskResult = EmptyTaskResult;
 
@@ -412,7 +412,7 @@ mod tests {
             id: "deterministic-service-capacity",
             service_task: true,
         });
-        let mut synchronizer = DistributedSynchronizer::new(handler.clone(), coordinator)?;
+        let mut synchronizer = DistributedAdapter::new(handler.clone(), coordinator)?;
         let parallelism = NonZeroUsize::new(2).ok_or_else(|| anyhow::anyhow!("parallelism must be positive"))?;
         let worker_handle = Worker::builder(endpoint)
             .with_parallelism(parallelism)
@@ -516,7 +516,7 @@ mod tests {
         });
         let mut handlers = HashMap::new();
         let erased_handler: Arc<dyn ErasedHandler> = handler.clone();
-        let id = DistributedSyncHandler::id(handler.as_ref()).to_owned();
+        let id = DistributedHandler::id(handler.as_ref()).to_owned();
         handlers.insert(id.clone(), erased_handler);
         let inner = Inner {
             worker_id: "test-worker".to_owned(),

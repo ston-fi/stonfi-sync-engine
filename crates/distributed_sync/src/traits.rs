@@ -39,18 +39,6 @@ impl<T> TaskBatch<T> {
         Self { synced_height, tasks }
     }
 
-    /// Returns the height committed after all tasks and result handling succeed.
-    #[must_use]
-    pub fn synced_height(&self) -> SyncHeight {
-        self.synced_height
-    }
-
-    /// Returns the tasks in result-order.
-    #[must_use]
-    pub fn tasks(&self) -> &[T] {
-        &self.tasks
-    }
-
     pub(crate) fn into_parts(self) -> (SyncHeight, Vec<T>) {
         (self.synced_height, self.tasks)
     }
@@ -61,7 +49,7 @@ impl<T> TaskBatch<T> {
 /// Register the same handler with the coordinator adapter and workers. Task
 /// processing is concurrent and at-least-once, so effects must be idempotent.
 #[async_trait::async_trait]
-pub trait DistributedSyncHandler: Send + Sync + 'static {
+pub trait DistributedHandler: Send + Sync + 'static {
     /// Task payload sent to workers.
     type Task: TaskPayload;
     /// Result payload returned to the coordinator.

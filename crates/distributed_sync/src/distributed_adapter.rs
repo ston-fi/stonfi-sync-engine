@@ -1,5 +1,5 @@
 use crate::coordinator::{Coordinator, TaskDeadline, TaskPriority};
-use crate::handler::{DistributedSyncHandler, TaskPayload};
+use crate::traits::{DistributedHandler, TaskPayload};
 use crate::utils::validate_timeout_millis;
 use futures::stream::{self, StreamExt, TryStreamExt};
 use std::sync::Arc;
@@ -9,14 +9,14 @@ use stonfi_sync_core::sync_engine::{SyncHandler, SyncHeight};
 
 const MAX_ONGOING_TASKS: usize = 10_000;
 
-/// Adapts a [`DistributedSyncHandler`] to `stonfi_sync_core`.
+/// Adapts a [`DistributedHandler`] to `stonfi_sync_core`.
 #[derive(Clone)]
-pub struct DistributedSynchronizer {
+pub struct DistributedAdapter {
     handler: Arc<dyn ErasedHandler>,
     coordinator: Coordinator,
 }
 
-impl DistributedSynchronizer {
+impl DistributedAdapter {
     /// Creates a coordinator-side adapter for `handler`.
     ///
     /// The same `Arc` can be registered through the builder returned by
@@ -28,7 +28,7 @@ impl DistributedSynchronizer {
     /// by the distributed protocol.
     pub fn new<H>(handler: Arc<H>, coordinator: Coordinator) -> SyncCoreResult<Self>
     where
-        H: DistributedSyncHandler,
+        H: DistributedHandler,
     {
         validate_timeout_millis(handler.sync_timeout(), "distributed handler synchronization timeout")?;
         Ok(Self { handler, coordinator })
@@ -36,7 +36,7 @@ impl DistributedSynchronizer {
 }
 
 #[async_trait::async_trait]
-impl SyncHandler for DistributedSynchronizer {
+impl SyncHandler for DistributedAdapter {
     fn id(&self) -> &str {
         self.handler.id()
     }
@@ -113,10 +113,10 @@ pub(crate) trait ErasedHandler: Send + Sync {
 #[async_trait::async_trait]
 impl<T> ErasedHandler for T
 where
-    T: DistributedSyncHandler,
+    T: DistributedHandler,
 {
     fn id(&self) -> &str {
-        DistributedSyncHandler::id(self)
+        DistributedHandler::id(self)
     }
 
     async fn create_tasks_bytes(
@@ -124,7 +124,7 @@ where
         from: SyncHeight,
         to: SyncHeight,
     ) -> SyncCoreResult<Option<(SyncHeight, Vec<Vec<u8>>)>> {
-        let Some(batch) = DistributedSyncHandler::create_tasks(self, from, to).await? else {
+        let Some(batch) = DistributedHandler::create_tasks(self, from, to).await? else {
             return Ok(None);
         };
         let (synced_height, tasks) = batch.into_parts();
@@ -137,7 +137,7 @@ where
 
     async fn process_task_bytes(&self, task_payload: &[u8]) -> SyncCoreResult<Vec<u8>> {
         let task = T::Task::decode(task_payload)?;
-        DistributedSyncHandler::process_task(self, task).await?.encode()
+        DistributedHandler::process_task(self, task).await?.encode()
     }
 
     async fn handle_results_bytes(
@@ -149,50 +149,50 @@ where
             .iter()
             .map(|payload| T::TaskResult::decode(payload))
             .collect::<SyncCoreResult<Vec<_>>>()?;
-        DistributedSyncHandler::handle_results(self, synced_height, results).await
+        DistributedHandler::handle_results(self, synced_height, results).await
     }
 
     fn task_priority(&self) -> TaskPriority {
-        DistributedSyncHandler::task_priority(self)
+        DistributedHandler::task_priority(self)
     }
 
     fn is_service_task(&self) -> bool {
-        DistributedSyncHandler::is_service_task(self)
+        DistributedHandler::is_service_task(self)
     }
 
     fn is_enabled(&self) -> bool {
-        DistributedSyncHandler::is_enabled(self)
+        DistributedHandler::is_enabled(self)
     }
 
     fn retry_delay(&self) -> Duration {
-        DistributedSyncHandler::retry_delay(self)
+        DistributedHandler::retry_delay(self)
     }
 
     fn min_batch_size(&self) -> usize {
-        DistributedSyncHandler::min_batch_size(self)
+        DistributedHandler::min_batch_size(self)
     }
 
     fn max_batch_size(&self) -> usize {
-        DistributedSyncHandler::max_batch_size(self)
+        DistributedHandler::max_batch_size(self)
     }
 
     fn sync_timeout(&self) -> Duration {
-        DistributedSyncHandler::sync_timeout(self)
+        DistributedHandler::sync_timeout(self)
     }
 
     fn allow_rewind(&self) -> bool {
-        DistributedSyncHandler::allow_rewind(self)
+        DistributedHandler::allow_rewind(self)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{DistributedSynchronizer, MAX_ONGOING_TASKS};
+    use super::{DistributedAdapter, MAX_ONGOING_TASKS};
     use crate::coordinator::Coordinator;
-    use crate::handler::{DistributedSyncHandler, TaskBatch};
     use crate::proto::CompleteRequest;
     use crate::proto::complete_request::Outcome;
     use crate::task::{EmptyTaskResult, RangeTask};
+    use crate::traits::{DistributedHandler, TaskBatch};
     use std::collections::VecDeque;
     use std::sync::Arc;
     use std::time::Duration;
@@ -202,7 +202,7 @@ mod tests {
     struct LargeBatchHandler;
 
     #[async_trait::async_trait]
-    impl DistributedSyncHandler for LargeBatchHandler {
+    impl DistributedHandler for LargeBatchHandler {
         type Task = RangeTask;
         type TaskResult = EmptyTaskResult;
 
@@ -231,8 +231,8 @@ mod tests {
     async fn test_large_batch_limits_coordinator_ongoing_tasks() -> anyhow::Result<()> {
         stonfi_metrics::init_metrics!()?;
         let coordinator = Coordinator::new();
-        let mut synchronizer = DistributedSynchronizer::new(Arc::new(LargeBatchHandler), coordinator.clone())?;
-        let sync_task = tokio::spawn(async move { synchronizer.sync_range(1, 1).await });
+        let mut adapter = DistributedAdapter::new(Arc::new(LargeBatchHandler), coordinator.clone())?;
+        let sync_task = tokio::spawn(async move { adapter.sync_range(1, 1).await });
 
         let mut assignments = VecDeque::with_capacity(MAX_ONGOING_TASKS);
         for _ in 0..MAX_ONGOING_TASKS {

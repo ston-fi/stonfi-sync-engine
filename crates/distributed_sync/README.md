@@ -29,15 +29,15 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 
 ## Runtime model
 
-Implement [`DistributedSyncHandler`](crate::handler::DistributedSyncHandler),
+Implement [`DistributedHandler`](crate::traits::DistributedHandler),
 use the same `Arc` for the core adapter and workers, and retain every lifecycle
 handle:
 
 ```no_run
 use std::net::SocketAddr;
 use std::sync::Arc;
-use stonfi_distributed_sync::handler::DistributedSyncHandler;
-use stonfi_distributed_sync::synchronizer::DistributedSynchronizer;
+use stonfi_distributed_sync::distributed_adapter::DistributedAdapter;
+use stonfi_distributed_sync::traits::DistributedHandler;
 use stonfi_distributed_sync::coordinator::Coordinator;
 use stonfi_distributed_sync::task_server::{TaskServer, TaskServerRunHandle};
 use stonfi_distributed_sync::worker::{Worker, WorkerRunHandle};
@@ -48,11 +48,11 @@ async fn build_runtime<H>(
     listen_address: SocketAddr,
 ) -> anyhow::Result<(Synchronizer, WorkerRunHandle, TaskServerRunHandle)>
 where
-    H: DistributedSyncHandler,
+    H: DistributedHandler,
 {
     stonfi_metrics::init_metrics!()?;
     let coordinator = Coordinator::new();
-    let synchronizer = Synchronizer::new(DistributedSynchronizer::new(
+    let synchronizer = Synchronizer::new(DistributedAdapter::new(
         handler.clone(),
         coordinator.clone(),
     )?);
@@ -138,4 +138,4 @@ startup initialization panics by design. Worker IDs are not metric labels.
 - The crate does not provide distributed locking or multi-writer status
   coordination. The `stonfi_sync_core` single-writer rule still applies.
 - Task payload compatibility is owned by each handler's
-  [`TaskPayload`](crate::handler::TaskPayload) implementation.
+  [`TaskPayload`](crate::traits::TaskPayload) implementation.

@@ -2,10 +2,10 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
 use stonfi_distributed_sync::coordinator::Coordinator;
-use stonfi_distributed_sync::handler::{DistributedSyncHandler, TaskBatch};
-use stonfi_distributed_sync::synchronizer::DistributedSynchronizer;
+use stonfi_distributed_sync::distributed_adapter::DistributedAdapter;
 use stonfi_distributed_sync::task::{EmptyTaskResult, RangeTask};
 use stonfi_distributed_sync::task_server::TaskServer;
+use stonfi_distributed_sync::traits::{DistributedHandler, TaskBatch};
 use stonfi_distributed_sync::worker::Worker;
 use stonfi_sync_core::errors::SyncCoreResult;
 use stonfi_sync_core::mem_status_store::MemStatusStore;
@@ -33,7 +33,7 @@ impl HeightLoader for OneHeightLoader {
 struct RangeHandler;
 
 #[async_trait::async_trait]
-impl DistributedSyncHandler for RangeHandler {
+impl DistributedHandler for RangeHandler {
     type Task = RangeTask;
     type TaskResult = EmptyTaskResult;
 
@@ -57,7 +57,7 @@ async fn main() -> anyhow::Result<()> {
 
     let coordinator = Coordinator::new();
     let handler = Arc::new(RangeHandler);
-    let distributed = DistributedSynchronizer::new(handler.clone(), coordinator.clone())?;
+    let adapter = DistributedAdapter::new(handler.clone(), coordinator.clone())?;
 
     let server = TaskServer::builder(coordinator)
         .with_listen_address("127.0.0.1:0".parse()?)
@@ -77,7 +77,7 @@ async fn main() -> anyhow::Result<()> {
     let height_provider = HeightProvider::new(OneHeightLoader);
     let status_store = Arc::new(MemStatusStore::new(0));
     let engine = SyncEngine::builder(status_store.clone())
-        .add_synchronizer(Synchronizer::new(distributed), &[&height_provider])?
+        .add_synchronizer(Synchronizer::new(adapter), &[&height_provider])?
         .add_height_provider(height_provider)?
         .build();
     let engine_handle = engine.run();

@@ -8,9 +8,9 @@ non-trivial reviews, implementations, refactors, and release preparation.
 
 The package connects `stonfi_sync_core` to remote gRPC workers:
 
-- `DistributedSyncHandler` defines typed task creation, task execution, and
+- `DistributedHandler` defines typed task creation, task execution, and
   ordered result handling.
-- `DistributedSynchronizer` adapts a handler to `SyncHandler`.
+- `DistributedAdapter` adapts a handler to `SyncHandler`.
 - `Coordinator` owns the in-memory priority queues and in-flight completions.
 - `TaskServer` exposes those queues through the private versioned protobuf API.
 - `Worker` polls, routes, processes, and completes tasks with bounded lifecycle
@@ -24,13 +24,13 @@ package. Do not move transport concerns into `stonfi_sync_core`.
 ## Public API and construction
 
 Keep public paths module-qualified; do not add root re-exports. The external
-extension point is `handler::DistributedSyncHandler`, with associated
+extension point is `traits::DistributedHandler`, with associated
 `TaskPayload` task and result types. Do not add a parallel coordinator trait,
 processor trait, codec abstraction, or convenience conversion without a
 demonstrated consumer requirement.
 
 Create one `Arc<Handler>`, pass it to
-`DistributedSynchronizer::new(handler.clone(), coordinator)`, and register it
+`DistributedAdapter::new(handler.clone(), coordinator)`, and register it
 with `Worker::builder(endpoint).add_handler(handler)`. A handler ID must be
 stable and identical in every coordinator and worker binary. `SyncEngine`'s
 builder owns ID validation when the adapter is registered; distributed
@@ -48,7 +48,7 @@ the initial no-progress sentinel. Handler retry and range controls use
 `retry_delay`, `min_batch_size`, `max_batch_size`, and `allow_rewind`.
 
 Create the shared `Coordinator` explicitly, then pass it to
-`TaskServer::builder` and `DistributedSynchronizer::new`. Builders live in
+`TaskServer::builder` and `DistributedAdapter::new`. Builders live in
 private child modules and expose `with_*` configuration setters plus `build`;
 the worker builder also exposes `add_handler` for required registrations. Do
 not add configuration structs, builder re-exports, or parallel construction paths.
@@ -69,7 +69,7 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 ```
 
 Initialize `stonfi_metrics`, create the shared coordinator and handler, start
-the server and workers, and register `DistributedSynchronizer` with the core
+the server and workers, and register `DistributedAdapter` with the core
 engine. Retain every run handle and shut down the core engine before workers and
 the server. The README doctest and `examples/distributed.rs` are the canonical
 integration references.

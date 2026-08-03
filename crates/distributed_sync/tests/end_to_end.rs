@@ -4,9 +4,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 use stonfi_distributed_sync::coordinator::Coordinator;
-use stonfi_distributed_sync::handler::{DistributedSyncHandler, TaskBatch, TaskPayload};
-use stonfi_distributed_sync::synchronizer::DistributedSynchronizer;
+use stonfi_distributed_sync::distributed_adapter::DistributedAdapter;
 use stonfi_distributed_sync::task_server::TaskServer;
+use stonfi_distributed_sync::traits::{DistributedHandler, TaskBatch, TaskPayload};
 use stonfi_distributed_sync::worker::Worker;
 use stonfi_sync_core::errors::{SyncCoreError, SyncCoreResult};
 use stonfi_sync_core::mem_status_store::MemStatusStore;
@@ -90,7 +90,7 @@ impl TestHandler {
 }
 
 #[async_trait::async_trait]
-impl DistributedSyncHandler for TestHandler {
+impl DistributedHandler for TestHandler {
     type Task = TestTask;
     type TaskResult = TestResult;
 
@@ -153,7 +153,7 @@ struct EmptyBatchHandler {
 }
 
 #[async_trait::async_trait]
-impl DistributedSyncHandler for EmptyBatchHandler {
+impl DistributedHandler for EmptyBatchHandler {
     type Task = TestTask;
     type TaskResult = TestResult;
 
@@ -181,7 +181,7 @@ impl DistributedSyncHandler for EmptyBatchHandler {
 struct PanickingHandler;
 
 #[async_trait::async_trait]
-impl DistributedSyncHandler for PanickingHandler {
+impl DistributedHandler for PanickingHandler {
     type Task = TestTask;
     type TaskResult = TestResult;
 
@@ -266,7 +266,7 @@ async fn test_missing_handler_failure_is_retried_on_compatible_worker() -> anyho
     init_test_metrics()?;
     let coordinator = Coordinator::new();
     let handler = Arc::new(TestHandler::new("retry-compatible", false, Duration::from_millis(1)));
-    let mut synchronizer = DistributedSynchronizer::new(handler.clone(), coordinator.clone())?;
+    let mut synchronizer = DistributedAdapter::new(handler.clone(), coordinator.clone())?;
     let server = TaskServer::builder(coordinator)
         .with_listen_address("127.0.0.1:0".parse()?)
         .with_shutdown_timeout(Duration::from_secs(1))
@@ -332,7 +332,7 @@ async fn test_empty_batch_advances_without_a_worker() -> anyhow::Result<()> {
     let handler = Arc::new(EmptyBatchHandler {
         handled: AtomicBool::new(false),
     });
-    let mut synchronizer = DistributedSynchronizer::new(handler.clone(), Coordinator::new())?;
+    let mut synchronizer = DistributedAdapter::new(handler.clone(), Coordinator::new())?;
 
     assert_eq!(synchronizer.sync_range(4, 7).await?, Some(7));
     assert!(handler.handled.load(Ordering::SeqCst));
@@ -392,7 +392,7 @@ async fn test_worker_shutdown_aborts_overlong_active_task() -> anyhow::Result<()
     init_test_metrics()?;
     let handler = Arc::new(TestHandler::new("bounded-shutdown", false, Duration::from_millis(500)));
     let coordinator = Coordinator::new();
-    let mut synchronizer = DistributedSynchronizer::new(handler.clone(), coordinator.clone())?;
+    let mut synchronizer = DistributedAdapter::new(handler.clone(), coordinator.clone())?;
     let server = TaskServer::builder(coordinator)
         .with_listen_address("127.0.0.1:0".parse()?)
         .with_shutdown_timeout(Duration::from_secs(1))
@@ -521,7 +521,7 @@ fn test_registration_and_configuration_validation() -> anyhow::Result<()> {
 
     let zero_timeout =
         Arc::new(TestHandler::new("zero-timeout", false, Duration::from_millis(1)).with_sync_timeout(Duration::ZERO));
-    assert!(DistributedSynchronizer::new(zero_timeout, Coordinator::new()).is_err());
+    assert!(DistributedAdapter::new(zero_timeout, Coordinator::new()).is_err());
 
     #[cfg(target_pointer_width = "64")]
     {
@@ -578,15 +578,15 @@ async fn setup<H>(
     handler: Arc<H>,
     parallelism: usize,
 ) -> anyhow::Result<(
-    DistributedSynchronizer,
+    DistributedAdapter,
     stonfi_distributed_sync::worker::WorkerRunHandle,
     stonfi_distributed_sync::task_server::TaskServerRunHandle,
 )>
 where
-    H: DistributedSyncHandler,
+    H: DistributedHandler,
 {
     let coordinator = Coordinator::new();
-    let synchronizer = DistributedSynchronizer::new(handler.clone(), coordinator.clone())?;
+    let synchronizer = DistributedAdapter::new(handler.clone(), coordinator.clone())?;
     let server = TaskServer::builder(coordinator)
         .with_listen_address("127.0.0.1:0".parse()?)
         .with_shutdown_timeout(Duration::from_secs(1))

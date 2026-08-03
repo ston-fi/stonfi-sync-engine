@@ -1,4 +1,4 @@
-use crate::handler::TaskPayload;
+use crate::traits::TaskPayload;
 use bincode::{Decode, Encode};
 use stonfi_sync_core::errors::{SyncCoreError, SyncCoreResult};
 use stonfi_sync_core::sync_engine::SyncHeight;
@@ -51,7 +51,7 @@ fn decode_exact<T: Decode<()>>(data: &[u8]) -> SyncCoreResult<T> {
 #[cfg(test)]
 mod tests {
     use super::{EmptyTaskResult, RangeTask};
-    use crate::handler::TaskPayload;
+    use crate::traits::TaskPayload;
     use stonfi_sync_core::sync_engine::SyncHeight;
 
     #[test]

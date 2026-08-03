@@ -1,10 +1,14 @@
 mod metrics;
 mod queue;
+mod types;
 
+pub(crate) use types::TaskDeadline;
+pub use types::TaskPriority;
+
+use crate::distributed_adapter::ErasedHandler;
 use crate::proto::complete_request::Outcome;
 use crate::proto::{CompleteRequest, TaskAssignment};
-use crate::synchronizer::ErasedHandler;
-use crate::utils::{deadline_from_unix_millis, deadline_unix_millis, timeout_deadline};
+use crate::utils::timeout_deadline;
 use metrics::{CoordinatorMetrics, CoordinatorTaskStatus};
 use parking_lot::Mutex;
 use queue::TaskQueue;
@@ -14,42 +18,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use stonfi_sync_core::errors::{SyncCoreError, SyncCoreResult};
 use tokio::sync::{Notify, oneshot};
-
-/// Coordinator dispatch priority.
-///
-/// Each queue dispatches higher priorities first and preserves FIFO within a
-/// priority. Service-capable workers prefer the service queue.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
-#[non_exhaustive]
-pub enum TaskPriority {
-    /// Lowest available priority.
-    Lowest,
-    /// Lower than normal priority.
-    Low,
-    /// Default priority.
-    #[default]
-    Normal,
-    /// Higher than normal priority.
-    High,
-    /// Highest available priority.
-    Highest,
-}
-
-#[derive(Clone, Copy)]
-pub(crate) struct TaskDeadline {
-    instant: tokio::time::Instant,
-    unix_ms: u64,
-}
-
-impl TaskDeadline {
-    pub(crate) fn new(timeout: Duration) -> SyncCoreResult<Self> {
-        let unix_ms = deadline_unix_millis(timeout, "distributed batch timeout")?;
-        Ok(Self {
-            instant: deadline_from_unix_millis(unix_ms, "distributed batch deadline")?,
-            unix_ms,
-        })
-    }
-}
 
 /// Process-local task queues and in-flight assignments shared by all clones.
 ///
@@ -331,12 +299,12 @@ impl Drop for AssignmentGuard {
 #[cfg(test)]
 mod tests {
     use super::{Coordinator, TaskDeadline};
-    use crate::handler::{DistributedSyncHandler, TaskBatch};
+    use crate::distributed_adapter::ErasedHandler;
     use crate::proto::CompleteRequest;
     use crate::proto::complete_request::Outcome;
-    use crate::synchronizer::ErasedHandler;
     use crate::task::{EmptyTaskResult, RangeTask};
     use crate::task_server::TaskServiceImpl;
+    use crate::traits::{DistributedHandler, TaskBatch};
     use std::sync::Arc;
     use std::time::Duration;
     use stonfi_sync_core::errors::SyncCoreResult;
@@ -350,7 +318,7 @@ mod tests {
     struct TestHandler(Duration);
 
     #[async_trait::async_trait]
-    impl DistributedSyncHandler for TestHandler {
+    impl DistributedHandler for TestHandler {
         type Task = RangeTask;
         type TaskResult = EmptyTaskResult;
 
