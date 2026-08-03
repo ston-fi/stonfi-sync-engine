@@ -30,13 +30,11 @@ external coordinates into the engine's height domain.
 
 ## Installation
 
-The crate has not published a remote Git release yet and is not published to
-crates.io. During development, pin it to a commit SHA that is reachable from
-the remote:
+Depend on the crate from the Git repository at a fixed revision:
 
 ```toml
 [dependencies]
-stonfi_sync_core = { git = "https://github.com/ston-fi/stonfi-sync-engine", rev = "<published-commit>" }
+stonfi_sync_core = { git = "https://github.com/ston-fi/stonfi-sync-engine", rev = "<revision>" }
 stonfi_metrics = { version = "0.0.1", git = "https://github.com/ston-fi/stonfi-metrics", rev = "v0.0.1" }
 ```
 
@@ -169,7 +167,7 @@ collectors with `stonfi_metrics`; applications must initialize all declared
 collectors during startup before running the engine:
 
 ```rust
-# fn initialize() -> anyhow::Result<()> {
+# fn initialize() -> Result<(), Box<dyn std::error::Error>> {
 stonfi_metrics::init_metrics!()?;
 # Ok(())
 # }
@@ -189,7 +187,7 @@ processing and `SyncStatusStore` persistence still retain the full `u64` value.
 
 ## Toolchain and features
 
-The crate uses Rust 2024 and supports Rust 1.93 and newer. It has no optional
+The crate uses Rust 2024 and supports Rust 1.95 and newer. It has no optional
 Cargo features. Diagnostics contain no ANSI escapes and are emitted through
 `tracing`; applications install and configure their own subscriber.
 
@@ -202,7 +200,7 @@ cargo test -p stonfi_sync_core --examples --locked
 cargo +nightly fmt --check
 cargo clippy -p stonfi_sync_core --all-targets --all-features --locked -- -D warnings
 RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc -p stonfi_sync_core --no-deps --all-features --locked
-cargo +1.93.0 check -p stonfi_sync_core --all-features --locked
+cargo +1.95.0 check -p stonfi_sync_core --all-features --locked
 cargo package --list --locked -p stonfi_sync_core
 ```
 

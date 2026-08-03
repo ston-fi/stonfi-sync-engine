@@ -5,17 +5,16 @@ gRPC workers. A coordinator creates an in-memory task batch, workers process the
 tasks concurrently, and the coordinator advances only after it receives and
 accepts every ordered result.
 
-The crate is currently unreleased and distributed from the
+The crate is distributed from the
 [`stonfi-sync-engine`](https://github.com/ston-fi/stonfi-sync-engine) Git
-repository. It requires Rust 1.93 or newer and a Tokio runtime.
+repository. It requires Rust 1.95 or newer and a Tokio runtime.
 Diagnostics are emitted through `tracing`; applications install and configure
 their own subscriber.
 
 Height-bearing APIs use the core `u64` `SyncHeight` domain. Height `0` remains
 the core engine's initial no-progress sentinel.
 
-During local development, depend on both workspace packages from the same
-revision:
+Depend on both workspace packages from the same revision:
 
 ```toml
 [dependencies]
@@ -30,13 +29,12 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 ## Runtime model
 
 Implement [`DistributedHandler`](crate::traits::DistributedHandler),
-use the same `Arc` for the core adapter and workers, and retain every lifecycle
+use the same `Arc` for the core engine and workers, and retain every lifecycle
 handle:
 
 ```no_run
 use std::net::SocketAddr;
 use std::sync::Arc;
-use stonfi_distributed_sync::distributed_adapter::DistributedAdapter;
 use stonfi_distributed_sync::traits::DistributedHandler;
 use stonfi_distributed_sync::coordinator::Coordinator;
 use stonfi_distributed_sync::task_server::{TaskServer, TaskServerRunHandle};
@@ -52,10 +50,7 @@ where
 {
     stonfi_metrics::init_metrics!()?;
     let coordinator = Coordinator::new();
-    let synchronizer = Synchronizer::new(DistributedAdapter::new(
-        handler.clone(),
-        coordinator.clone(),
-    )?);
+    let synchronizer = handler.clone().into_sync(coordinator.clone())?;
 
     let server = TaskServer::builder(coordinator)
         .with_listen_address(listen_address)
@@ -73,7 +68,8 @@ where
 Workers use [`std::thread::available_parallelism`] by default. Call
 `with_parallelism` only when the application needs an explicit limit.
 
-Register the returned `Synchronizer` with `stonfi_sync_core::SyncEngine`. On
+Call `into_sync` on the shared handler and register the returned `Synchronizer`
+with `stonfi_sync_core::SyncEngine`. On
 shutdown, stop the core engine before the worker and server. See
 [`examples/distributed.rs`](examples/distributed.rs) for the complete workflow.
 Initial-height configuration belongs to the core `SyncStatusStore`; distributed
@@ -129,7 +125,7 @@ startup initialization panics by design. Worker IDs are not metric labels.
 - The protocol has no authentication, TLS, forwarding, or persistent transport.
   Deploy it only on a trusted network or behind infrastructure that supplies
   those controls.
-- The unreleased wire contract remains `stonfi.distributed_sync.v1` and carries
+- The wire protocol is `stonfi.distributed_sync.v1` and carries
   absolute Unix task deadlines. Coordinator and worker processes must use
   compatible crate revisions.
 - Coordinator and worker hosts must keep their system clocks synchronized. Task

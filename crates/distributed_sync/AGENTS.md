@@ -2,7 +2,7 @@
 
 This package is a public Rust library distributed through Git tags as part of
 the `stonfi-sync-engine` workspace. Use the `rust-library-review` skill for
-non-trivial reviews, implementations, refactors, and release preparation.
+non-trivial reviews, implementations, and refactors.
 
 ## Responsibility and non-goals
 
@@ -10,7 +10,7 @@ The package connects `stonfi_sync_core` to remote gRPC workers:
 
 - `DistributedHandler` defines typed task creation, task execution, and
   ordered result handling.
-- `DistributedAdapter` adapts a handler to `SyncHandler`.
+- The private `DistributedAdapter` adapts a handler to `SyncHandler`.
 - `Coordinator` owns the in-memory priority queues and in-flight completions.
 - `TaskServer` exposes those queues through the private versioned protobuf API.
 - `Worker` polls, routes, processes, and completes tasks with bounded lifecycle
@@ -29,13 +29,13 @@ extension point is `traits::DistributedHandler`, with associated
 processor trait, codec abstraction, or convenience conversion without a
 demonstrated consumer requirement.
 
-Create one `Arc<Handler>`, pass it to
-`DistributedAdapter::new(handler.clone(), coordinator)`, and register it
-with `Worker::builder(endpoint).add_handler(handler)`. A handler ID must be
-stable and identical in every coordinator and worker binary. `SyncEngine`'s
-builder owns ID validation when the adapter is registered; distributed
-constructors do not duplicate it. Initial-height configuration belongs to the
-core `SyncStatusStore`, not to distributed handlers.
+Create one `Arc<Handler>`, call
+`handler.clone().into_sync(coordinator)` for the core engine, and register
+the same handler with `Worker::builder(endpoint).add_handler(handler)`. A
+handler ID must be stable and identical in every coordinator and worker binary.
+`SyncEngine`'s builder owns ID validation when the synchronizer is registered;
+distributed constructors do not duplicate it. Initial-height configuration
+belongs to the core `SyncStatusStore`, not to distributed handlers.
 
 Public fallible APIs return `stonfi_sync_core::errors::SyncCoreResult`. Keep
 transport-generated protobuf types private. `TaskBatch` owns ordered tasks and
@@ -48,7 +48,7 @@ the initial no-progress sentinel. Handler retry and range controls use
 `retry_delay`, `min_batch_size`, `max_batch_size`, and `allow_rewind`.
 
 Create the shared `Coordinator` explicitly, then pass it to
-`TaskServer::builder` and `DistributedAdapter::new`. Builders live in
+`TaskServer::builder` and `DistributedHandler::into_sync`. Builders live in
 private child modules and expose `with_*` configuration setters plus `build`;
 the worker builder also exposes `add_handler` for required registrations. Do
 not add configuration structs, builder re-exports, or parallel construction paths.
@@ -56,23 +56,13 @@ Worker parallelism defaults to `std::thread::available_parallelism()` and can be
 overridden explicitly. Validate invariants before spawning background tasks.
 
 Downstream applications depend on both Git-distributed packages from the same
-workspace revision:
-
-```toml
-[dependencies]
-anyhow = "1"
-async-trait = "0.1"
-stonfi_distributed_sync = { git = "https://github.com/ston-fi/stonfi-sync-engine", rev = "<revision>" }
-stonfi_metrics = { version = "0.0.1", git = "https://github.com/ston-fi/stonfi-metrics", rev = "v0.0.1" }
-stonfi_sync_core = { git = "https://github.com/ston-fi/stonfi-sync-engine", rev = "<revision>" }
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
-```
+workspace revision, as documented in `README.md`.
 
 Initialize `stonfi_metrics`, create the shared coordinator and handler, start
-the server and workers, and register `DistributedAdapter` with the core
-engine. Retain every run handle and shut down the core engine before workers and
-the server. The README doctest and `examples/distributed.rs` are the canonical
-integration references.
+the server and workers, and register the handler's `Synchronizer` with the core
+engine. Retain every run handle and shut down the core engine before
+workers and the server. The README doctest and `examples/distributed.rs` are the
+canonical integration references.
 
 ## Delivery, ordering, and lifecycle invariants
 
@@ -114,14 +104,12 @@ complete RPCs. Poll requests carry worker identity, timeout, and service-task
 support, but no handler capability list. Assignments carry the coordinator's
 absolute Unix deadline in milliseconds; workers compare it directly with their
 local system clock and must not replace it with a fresh timeout. Coordinator and
-worker hosts therefore require synchronized clocks. This protocol has not been
-released, so the current `v1` contract does not need a compatibility bridge for
-its former relative-timeout field.
+worker hosts therefore require synchronized clocks.
 
 Changing an RPC path, field number, outcome shape, task codec, default timeout,
 delivery guarantee, result ordering, or service-task rule is a behavioral and
 wire compatibility change. Update README, rustdoc, examples, tests, this guide,
-and changelog together.
+and the consumer-facing changelog together.
 
 The build script uses vendored `protoc` through `prost-build`; it must propagate
 errors and must not mutate process environment or panic.
@@ -136,7 +124,7 @@ coordinator tasks, serving requests, or running a worker. Metric helpers access
 registered cells directly and therefore panic if startup skipped
 initialization. Constructors must not initialize individual metric cells or add
 redundant availability checks. Keep worker IDs out of labels and preserve these
-released names and label sets:
+names and label sets because dashboards and alerts consume them:
 
 - `stonfi_distributed_sync_coordinator_tasks_total{handler_id,status}`
 - `stonfi_distributed_sync_coordinator_task_duration_ms{handler_id,status}`
@@ -147,7 +135,7 @@ released names and label sets:
 - `stonfi_distributed_sync_server_requests_total{method,status}`
 - `stonfi_distributed_sync_server_request_duration_ms{method,status}`
 
-Do not restore provider-style collector APIs or tests that only assert metric
+Do not add provider-style collector APIs or tests that only assert metric
 registration, names, labels, or increments.
 
 ## Errors, tests, and common mistakes
@@ -195,11 +183,11 @@ cargo test --workspace --examples --locked
 cargo +nightly fmt --check
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc --workspace --no-deps --all-features --locked
-cargo +1.93.0 check --workspace --all-features --locked
+cargo +1.95.0 check --workspace --all-features --locked
 cargo package --list --locked -p stonfi_sync_core
 cargo package --list --locked -p stonfi_distributed_sync
 ```
 
 Also compile a fresh external consumer and inspect Cargo metadata/package
 contents for private dependency origins. The package is Git-distributed with
-`publish = false`; CI owns tags and GitHub Releases.
+`publish = false`; do not change that policy unless explicitly requested.

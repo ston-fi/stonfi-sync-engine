@@ -11,22 +11,13 @@ const MAX_ONGOING_TASKS: usize = 10_000;
 
 /// Adapts a [`DistributedHandler`] to `stonfi_sync_core`.
 #[derive(Clone)]
-pub struct DistributedAdapter {
+pub(crate) struct DistributedAdapter {
     handler: Arc<dyn ErasedHandler>,
     coordinator: Coordinator,
 }
 
 impl DistributedAdapter {
-    /// Creates a coordinator-side adapter for `handler`.
-    ///
-    /// The same `Arc` can be registered through the builder returned by
-    /// [`Worker::builder`](crate::worker::Worker::builder).
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the synchronization timeout cannot be represented
-    /// by the distributed protocol.
-    pub fn new<H>(handler: Arc<H>, coordinator: Coordinator) -> SyncCoreResult<Self>
+    pub(crate) fn new<H>(handler: Arc<H>, coordinator: Coordinator) -> SyncCoreResult<Self>
     where
         H: DistributedHandler,
     {
@@ -189,10 +180,11 @@ where
 mod tests {
     use super::{DistributedAdapter, MAX_ONGOING_TASKS};
     use crate::coordinator::Coordinator;
-    use crate::proto::CompleteRequest;
     use crate::proto::complete_request::Outcome;
+    use crate::proto::{CompleteRequest, TaskAssignment};
     use crate::task::{EmptyTaskResult, RangeTask};
     use crate::traits::{DistributedHandler, TaskBatch};
+    use parking_lot::Mutex;
     use std::collections::VecDeque;
     use std::sync::Arc;
     use std::time::Duration;
@@ -200,6 +192,48 @@ mod tests {
     use stonfi_sync_core::sync_engine::{SyncHandler, SyncHeight};
 
     struct LargeBatchHandler;
+
+    #[derive(Default)]
+    struct OrderingHandler {
+        results: Mutex<Vec<SyncHeight>>,
+    }
+
+    #[async_trait::async_trait]
+    impl DistributedHandler for OrderingHandler {
+        type Task = RangeTask;
+        type TaskResult = RangeTask;
+
+        fn id(&self) -> &str {
+            "ordering"
+        }
+
+        async fn create_tasks(
+            &self,
+            _from: SyncHeight,
+            to: SyncHeight,
+        ) -> SyncCoreResult<Option<TaskBatch<Self::Task>>> {
+            let tasks = (1..=3)
+                .map(|height| RangeTask {
+                    from: height,
+                    to: height,
+                })
+                .collect();
+            Ok(Some(TaskBatch::new(to, tasks)))
+        }
+
+        async fn process_task(&self, task: Self::Task) -> SyncCoreResult<Self::TaskResult> {
+            Ok(task)
+        }
+
+        async fn handle_results(
+            &self,
+            _synced_height: SyncHeight,
+            results: Vec<Self::TaskResult>,
+        ) -> SyncCoreResult<()> {
+            *self.results.lock() = results.into_iter().map(|result| result.from).collect();
+            Ok(())
+        }
+    }
 
     #[async_trait::async_trait]
     impl DistributedHandler for LargeBatchHandler {
@@ -263,11 +297,45 @@ mod tests {
         Ok(())
     }
 
+    #[tokio::test]
+    async fn test_results_preserve_creation_order() -> anyhow::Result<()> {
+        stonfi_metrics::init_metrics!()?;
+        let coordinator = Coordinator::new();
+        let handler = Arc::new(OrderingHandler::default());
+        let mut adapter = DistributedAdapter::new(handler.clone(), coordinator.clone())?;
+        let sync_task = tokio::spawn(async move { adapter.sync_range(1, 3).await });
+
+        let mut assignments = Vec::new();
+        for _ in 0..3 {
+            assignments.push(
+                coordinator
+                    .poll(Duration::from_secs(1), false)
+                    .await?
+                    .ok_or_else(|| anyhow::anyhow!("expected an assignment"))?,
+            );
+        }
+        for assignment in assignments.into_iter().rev() {
+            complete_with_payload(&coordinator, assignment)?;
+        }
+
+        assert_eq!(sync_task.await??, Some(3));
+        assert_eq!(&*handler.results.lock(), &[1, 2, 3]);
+        Ok(())
+    }
+
     fn complete_assignment(coordinator: &Coordinator, assignment_id: u64) -> SyncCoreResult<()> {
         coordinator.complete(CompleteRequest {
             worker_id: "test-worker".to_owned(),
             assignment_id,
             outcome: Some(Outcome::ResultPayload(Vec::new())),
+        })
+    }
+
+    fn complete_with_payload(coordinator: &Coordinator, assignment: TaskAssignment) -> SyncCoreResult<()> {
+        coordinator.complete(CompleteRequest {
+            worker_id: "test-worker".to_owned(),
+            assignment_id: assignment.assignment_id,
+            outcome: Some(Outcome::ResultPayload(assignment.payload)),
         })
     }
 }

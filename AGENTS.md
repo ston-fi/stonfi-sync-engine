@@ -2,14 +2,14 @@
 
 This repository is a public Rust library workspace distributed through Git
 tags. Use the `rust-library-review` skill for non-trivial reviews,
-implementations, refactors, workspace changes, and release preparation.
+implementations, refactors, and workspace changes.
 
 ## Workspace boundary
 
 All packages live under `crates/`:
 
 - `crates/sync_core` contains the transport-independent synchronization engine
-  and is published as the `stonfi_sync_core` package.
+  in the `stonfi_sync_core` package.
 - `crates/distributed_sync` contains the public `stonfi_distributed_sync`
   package owning in-memory distributed task coordination, gRPC/protobuf,
   server and worker lifecycles, and task serialization.
@@ -29,10 +29,9 @@ guide and the relevant package guide.
 - Keep the root manifest virtual; do not add a root Rust package.
 - Keep package names, paths, README links, CI commands, lockfile, and workspace
   members synchronized.
-- Preserve independent package versioning. A workspace tag may release one or
-  more packages.
-- Do not manually maintain package changelogs during development. Release-plz
-  release PRs own generated changelog entries unless the release policy changes.
+- Preserve independent package versioning.
+- Keep package changelogs concise and consumer-facing; do not use them as
+  development logs.
 - Review package contents from the workspace root with
   `cargo package --list -p <package>`.
 - Do not introduce shared workspace dependencies until at least two packages
@@ -54,14 +53,10 @@ cargo test --workspace --doc --locked
 cargo test --workspace --examples --locked
 cargo +nightly fmt --check
 RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc --workspace --no-deps --all-features --locked
-cargo +1.93.0 check --workspace --all-features --locked
+cargo +1.95.0 check --workspace --all-features --locked
 cargo package --list --locked -p stonfi_sync_core
 cargo package --list --locked -p stonfi_distributed_sync
 ```
 
-GitHub CI owns these gates. Packages are currently Git-distributed with
-`publish = false`. Release-plz runs only after the quality, MSRV, and external
-Git-consumer jobs pass on `main`, and creates Git tags and GitHub Releases
-without publishing to crates.io. Do not add registry credentials, enable
-crates.io publishing, or manually change versions and tags unless a release
-task explicitly requires it.
+Packages are Git-distributed with `publish = false`. Do not change the
+distribution or versioning policy unless the task explicitly requires it.

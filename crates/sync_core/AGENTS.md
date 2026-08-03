@@ -3,7 +3,7 @@
 This package is a public Rust library distributed through Git tags as part of
 the `stonfi-sync-engine` workspace.
 Use the `rust-library-review` skill for non-trivial reviews, implementations,
-refactors, and release preparation.
+and refactors.
 
 ## Responsibility and workspace boundary
 
@@ -65,7 +65,7 @@ Engine metrics are private global collectors registered through
 initialize the global registry and optionally serve `/metrics`. Metric helpers
 access the registered cells directly and therefore panic if startup skipped
 initialization. Do not initialize individual metric cells from engine
-constructors, add redundant availability checks, reintroduce per-engine
+constructors, add redundant availability checks, expose per-engine
 collector APIs, or expose Prometheus types publicly.
 All engine metric series use `handler_id` for the height-provider or
 synchronizer identifier label.
@@ -116,13 +116,13 @@ engine or status-store height domain.
 For public API, behavior, feature, workspace, dependency, or package-surface
 changes, review and update the README, rustdoc, example, tests, this guide, CI,
 and package include rules in the same change, or record why an artifact is
-unaffected. Do not manually populate `CHANGELOG.md`; release-plz release PRs own
-generated entries. Add deterministic tests for owned behavior and failure modes,
-not for third-party behavior or metric registration.
+unaffected. Keep the changelog concise and consumer-facing. Add deterministic
+tests for owned behavior and failure modes, not for third-party behavior or
+metric registration.
 
 Use `Result`-returning Rust tests with `?` whenever a called operation is
 fallible. Keep changes narrow and avoid refactoring the synchronizer state
-machine unless correctness cannot be restored locally. Do not introduce a
+machine unless correctness requires it. Do not introduce a
 second public path for an existing capability.
 
 ## Validation
@@ -141,13 +141,9 @@ cargo test -p stonfi_sync_core --doc --locked
 cargo test -p stonfi_sync_core --examples --locked
 cargo +nightly fmt --check
 RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc -p stonfi_sync_core --no-deps --all-features --locked
-cargo +1.93.0 check -p stonfi_sync_core --all-features --locked
+cargo +1.95.0 check -p stonfi_sync_core --all-features --locked
 cargo package --list --locked -p stonfi_sync_core
 ```
 
-GitHub CI owns these validation gates. The package is intended for Git
-distribution, has no remote release yet, and has `publish = false`. Release-plz
-runs only after the quality, MSRV, and external-consumer jobs pass on `main`,
-and creates the Git tag and GitHub Release without publishing to crates.io. Do
-not add a registry token or manually change versions and tags unless a release
-task explicitly requires it.
+The package is Git-distributed with `publish = false`. Do not change the
+distribution or versioning policy unless the task explicitly requires it.

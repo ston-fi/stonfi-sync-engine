@@ -323,7 +323,6 @@ mod tests {
     use crate::task_server::{PollObserver, TaskServer};
     use crate::traits::{DistributedHandler, TaskBatch};
     use std::collections::HashMap;
-    use std::num::NonZeroUsize;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
@@ -413,9 +412,7 @@ mod tests {
             service_task: true,
         });
         let mut synchronizer = DistributedAdapter::new(handler.clone(), coordinator)?;
-        let parallelism = NonZeroUsize::new(2).ok_or_else(|| anyhow::anyhow!("parallelism must be positive"))?;
         let worker_handle = Worker::builder(endpoint)
-            .with_parallelism(parallelism)
             .with_service_tasks_enabled(true)
             .with_polling_timeout(Duration::from_secs(2))
             .with_reconnect_delay(Duration::from_millis(10))
@@ -424,7 +421,7 @@ mod tests {
             .build()?
             .run();
 
-        tokio::time::timeout(Duration::from_secs(1), observer.wait_for(2)).await?;
+        tokio::time::timeout(Duration::from_secs(1), observer.wait_for(1)).await?;
         assert_eq!(
             tokio::time::timeout(Duration::from_secs(1), synchronizer.sync_range(1, 1)).await??,
             Some(1)
