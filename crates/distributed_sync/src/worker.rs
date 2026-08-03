@@ -53,7 +53,6 @@ impl Worker {
 }
 
 /// Owns polling loops spawned by [`Worker::run`].
-#[must_use = "dropping the run handle requests worker shutdown without waiting"]
 pub struct WorkerRunHandle {
     cancellation: CancellationToken,
     tasks: FuturesUnordered<JoinHandle<()>>,
