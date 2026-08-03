@@ -34,12 +34,13 @@ impl Builder {
         }
     }
 
-    /// Registers a height provider.
+    /// Registers a height provider or height loader.
     ///
     /// # Errors
     ///
     /// Returns an error when the handler ID is invalid, reserved, or duplicated.
-    pub fn add_height_provider(mut self, provider: HeightProvider) -> SyncCoreResult<Self> {
+    pub fn add_height_provider(mut self, provider: impl Into<HeightProvider>) -> SyncCoreResult<Self> {
+        let provider = provider.into();
         let id = provider.id().to_owned();
         validate_id(&id)?;
         if !self.registered_ids.insert(id.clone()) {
@@ -49,13 +50,18 @@ impl Builder {
         Ok(self)
     }
 
-    /// Registers a synchronizer and its upstream progress providers.
+    /// Registers a synchronizer or sync handler with its upstream progress providers.
     ///
     /// # Errors
     ///
     /// Returns an error for an invalid, reserved, or duplicate handler ID,
     /// missing progress providers, or invalid range limits.
-    pub fn add_synchronizer(mut self, sync: Synchronizer, providers: &[&dyn ProgressProvider]) -> SyncCoreResult<Self> {
+    pub fn add_synchronizer(
+        mut self,
+        sync: impl Into<Synchronizer>,
+        providers: &[&dyn ProgressProvider],
+    ) -> SyncCoreResult<Self> {
+        let sync = sync.into();
         let id = sync.handler.id().to_owned();
         validate_id(&id)?;
         let min_batch_size = sync.handler.min_batch_size();

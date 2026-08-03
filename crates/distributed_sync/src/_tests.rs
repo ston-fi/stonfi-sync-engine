@@ -170,7 +170,7 @@ async fn test_sync_engine_runs_through_server_and_worker() -> anyhow::Result<()>
     let height_provider = HeightProvider::new(OneHeightLoader);
     let status_store = Arc::new(MemStatusStore::new(0));
     let engine = SyncEngine::builder(status_store.clone())
-        .add_synchronizer(distributed.into(), &[&height_provider])?
+        .add_synchronizer(distributed, &[&height_provider])?
         .add_height_provider(height_provider)?
         .build()
         .run();

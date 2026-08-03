@@ -31,7 +31,9 @@ demonstrated consumer requirement.
 
 Create independent handler instances for coordinator and worker processes.
 Consume the coordinator-side instance with `handler.into_sync(coordinator)` and
-register each worker-side instance with
+pass the returned private adapter directly to `SyncEngine`'s builder. Convert
+the adapter into a core `Synchronizer` first only when another handler depends
+on its progress. Register each worker-side instance with
 `Worker::builder(endpoint).add_handler(handler)`. Handler state is process-local;
 only the handler type and stable ID are shared across binaries. A handler ID
 must be stable and identical in every coordinator and worker binary.
@@ -62,7 +64,7 @@ workspace revision, as documented in `README.md`.
 
 Initialize `stonfi_metrics`, create the shared coordinator plus independent
 coordinator-side and worker-side handlers, start the server and workers, and
-register the coordinator-side handler's `Synchronizer` with the core engine.
+register the coordinator-side handler's adapter with the core engine.
 Retain every run handle and shut down the core engine before workers and the
 server. The README doctest and `examples/distributed.rs` are the canonical
 integration references.

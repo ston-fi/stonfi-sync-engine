@@ -4,7 +4,7 @@ use std::time::Duration;
 use stonfi_sync_core::errors::SyncCoreResult;
 use stonfi_sync_core::mem_status_store::MemStatusStore;
 use stonfi_sync_core::sync_engine::{
-    HeightLoader, HeightProvider, SyncCallback, SyncEngine, SyncHandler, SyncHeight, SyncStatusStore, Synchronizer,
+    HeightLoader, HeightProvider, SyncCallback, SyncEngine, SyncHandler, SyncHeight, SyncStatusStore,
 };
 use tracing_subscriber::EnvFilter;
 
@@ -106,8 +106,6 @@ async fn main() -> anyhow::Result<()> {
         id: "example_height_source",
         max_height: 5,
     });
-    let synchronizer = Synchronizer::new(ExampleHandler { id: "example_sync" });
-
     // The builder wires together:
     // 1. the height provider that discovers new heights
     // 2. the synchronizer that processes them
@@ -116,7 +114,7 @@ async fn main() -> anyhow::Result<()> {
     // Passing `&height_provider` makes the synchronizer depend on its progress. The
     // builder clones the progress receiver before taking ownership below.
     let engine = SyncEngine::builder(status_store.clone())
-        .add_synchronizer(synchronizer, &[&height_provider])?
+        .add_synchronizer(ExampleHandler { id: "example_sync" }, &[&height_provider])?
         .add_height_provider(height_provider)?
         .add_callback(Arc::new(ExampleCallback))
         .build();

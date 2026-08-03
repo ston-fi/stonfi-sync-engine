@@ -40,7 +40,7 @@ async fn test_sync_respects_fixed_batch_size() -> anyhow::Result<()> {
     let status_store = Arc::new(TestStatusStore::new(0));
 
     let id = "sync_ranged".to_string();
-    let sync = TestSyncRanged::new(&id, 20).into();
+    let sync = TestSyncRanged::new(&id, 20);
 
     let engine = SyncEngine::builder(status_store.clone())
         .add_synchronizer(sync, &[&height_provider])?
@@ -70,7 +70,7 @@ async fn test_success_callbacks_are_invoked() -> anyhow::Result<()> {
     let status_store = Arc::new(TestStatusStore::new(0));
 
     let id = "sync_callback".to_string();
-    let sync = TestSyncRanged::new(&id, 20).into();
+    let sync = TestSyncRanged::new(&id, 20);
 
     const LOADED: usize = 1;
     const PUBLISHED: usize = 1 << 1;
@@ -157,7 +157,7 @@ async fn test_partial_sync_propagates_processed_height_to_children() -> anyhow::
     let child_id = "sync_child_partial".to_string();
     let sync_a: Synchronizer = TestSyncPartial::new(&parent_id, 1).into();
     let sync_a_progress = TestProgressProvider(sync_a.subscribe());
-    let sync_b = TestSync::new(&child_id, 1).into();
+    let sync_b = TestSync::new(&child_id, 1);
 
     let engine = SyncEngine::builder(status_store.clone())
         .add_synchronizer(sync_a, &[&height_provider])?
@@ -239,7 +239,7 @@ async fn test_ignored_range() -> anyhow::Result<()> {
     let parent_sync: Synchronizer =
         TestIgnoreThenSync::new(&parent_id, parent_calls.clone(), parent_ranges.clone()).into();
     let parent_progress = TestProgressProvider(parent_sync.subscribe());
-    let child_sync = TestSync::new(&child_id, 1).into();
+    let child_sync = TestSync::new(&child_id, 1);
 
     let (progress_tx, progress_rx) = tokio::sync::watch::channel(0);
     let progress_provider = TestProgressProvider(progress_rx);
@@ -375,7 +375,7 @@ async fn test_on_sync_error_callback_is_invoked() -> anyhow::Result<()> {
     let status_store = Arc::new(TestStatusStore::new(0));
     let attempts = Arc::new(AtomicUsize::new(0));
     let id = "sync_error_callback".to_string();
-    let sync = TestSyncFailFirst::new(&id, attempts).into();
+    let sync = TestSyncFailFirst::new(&id, attempts);
     let sync_error_calls = Arc::new(AtomicUsize::new(0));
     let callback = Arc::new(TestSyncErrorCallback {
         calls: sync_error_calls.clone(),
@@ -431,7 +431,7 @@ async fn test_invalid_synced_height_is_retried_and_not_saved() -> anyhow::Result
     let status_store = Arc::new(TestStatusStore::new(0));
     let sync_calls = Arc::new(AtomicUsize::new(0));
     let id = "sync_invalid_height".to_string();
-    let sync = TestSyncInvalidFirst::new(&id, sync_calls.clone()).into();
+    let sync = TestSyncInvalidFirst::new(&id, sync_calls.clone());
 
     let engine = SyncEngine::builder(status_store.clone())
         .add_synchronizer(sync, &[&height_provider])?
@@ -559,7 +559,7 @@ async fn test_allow_rewind_accepts_rewound_height_without_retry() -> anyhow::Res
     let status_store = Arc::new(TestStatusStore::new(0));
     let sync_calls = Arc::new(AtomicUsize::new(0));
     let id = "sync_allow_rewind".to_string();
-    let sync = TestRewindSync::new(&id, sync_calls.clone()).into();
+    let sync = TestRewindSync::new(&id, sync_calls.clone());
     let (progress_tx, progress_rx) = tokio::sync::watch::channel(1);
     let progress_provider = TestProgressProvider(progress_rx);
     let callback = Arc::new(StopAfterFirstSyncCallback {
@@ -620,7 +620,7 @@ async fn test_rewound_height_is_retried_when_allow_rewind_is_false() -> anyhow::
     let status_store = Arc::new(TestStatusStore::new(0));
     let sync_calls = Arc::new(AtomicUsize::new(0));
     let id = "sync_no_rewind".to_string();
-    let sync = TestNoRewindSync::new(&id, sync_calls.clone()).into();
+    let sync = TestNoRewindSync::new(&id, sync_calls.clone());
 
     let engine = SyncEngine::builder(status_store.clone())
         .add_synchronizer(sync, &[&height_provider])?
@@ -725,7 +725,7 @@ async fn test_on_sync_complete_callback_failure_does_not_rerun_sync_range() -> a
     let height_provider: HeightProvider =
         TestStepHeightLoader::new("test_init_complete_callback", height_loader_calls.clone()).into();
     let sync_calls = Arc::new(AtomicUsize::new(0));
-    let sync = TestCountingSync::new("sync_complete_callback", sync_calls.clone()).into();
+    let sync = TestCountingSync::new("sync_complete_callback", sync_calls.clone());
     let callback_calls = Arc::new(AtomicUsize::new(0));
     let callback = Arc::new(TestCompleteCallback {
         calls: callback_calls.clone(),
@@ -759,7 +759,7 @@ async fn test_missing_persisted_height_uses_and_stores_configured_initial_height
     let height_provider: HeightProvider = TestHeightLoader::new("test_init_initial_height", 2).into();
     let status_store = Arc::new(TestStatusStore::new(7));
     let id = "sync_initial_height".to_string();
-    let sync = TestSync::new(&id, 0).into();
+    let sync = TestSync::new(&id, 0);
 
     let engine = SyncEngine::builder(status_store.clone())
         .add_synchronizer(sync, &[&height_provider])?

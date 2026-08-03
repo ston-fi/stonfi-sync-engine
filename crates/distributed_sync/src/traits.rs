@@ -2,7 +2,7 @@ use crate::coordinator::{Coordinator, TaskPriority};
 use crate::distributed_adapter::DistributedAdapter;
 use std::time::Duration;
 use stonfi_sync_core::errors::SyncCoreResult;
-use stonfi_sync_core::sync_engine::{SyncHeight, Synchronizer};
+use stonfi_sync_core::sync_engine::{SyncHandler, SyncHeight, Synchronizer};
 
 /// Deterministic task and result serialization for gRPC transport.
 ///
@@ -60,18 +60,22 @@ pub trait DistributedHandler: Send + Sync + 'static {
     /// Returns the stable handler ID used for routing, logging, metrics, and status.
     fn id(&self) -> &str;
 
-    /// Consumes this coordinator-side handler for registration with
-    /// `stonfi_sync_core`.
+    /// Consumes this coordinator-side handler into an adapter for registration
+    /// with `stonfi_sync_core`.
+    ///
+    /// The adapter can be passed directly to `SyncEngine`'s builder. Convert it
+    /// into a [`Synchronizer`] first when another handler depends on its
+    /// progress.
     ///
     /// # Errors
     ///
     /// Returns an error when the synchronization timeout cannot be represented
     /// by the distributed protocol.
-    fn into_sync(self, coordinator: Coordinator) -> SyncCoreResult<Synchronizer>
+    fn into_sync(self, coordinator: Coordinator) -> SyncCoreResult<impl SyncHandler + Into<Synchronizer>>
     where
         Self: Sized,
     {
-        Ok(DistributedAdapter::new(self, coordinator)?.into())
+        DistributedAdapter::new(self, coordinator)
     }
 
     /// Creates tasks for the inclusive engine range `[from, to]`.

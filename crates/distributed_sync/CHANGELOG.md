@@ -9,6 +9,9 @@ here.
   `Worker::builder(...).add_handler` to consume owned handlers instead of
   `Arc<Handler>`. Applications should construct independent handler instances
   for coordinator and worker processes.
+- Return the private sync adapter from `DistributedHandler::into_sync` so it can
+  be registered directly; convert it explicitly to a core `Synchronizer` only
+  when its progress is an upstream dependency.
 
 ## [0.0.1](https://github.com/ston-fi/stonfi-sync-engine/releases/tag/v0.0.1) - 2026-08-03
 

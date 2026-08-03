@@ -72,11 +72,9 @@ async fn test_wait_returns_task_join_failure() -> anyhow::Result<()> {
         }
     }
 
-    let pending: HeightProvider = PendingHeightLoader.into();
-    let panicking: HeightProvider = PanickingHeightLoader.into();
     let engine = SyncEngine::builder(Arc::new(TestStatusStore::new(0)))
-        .add_height_provider(pending)?
-        .add_height_provider(panicking)?
+        .add_height_provider(PendingHeightLoader)?
+        .add_height_provider(PanickingHeightLoader)?
         .build();
 
     let result = tokio::time::timeout(Duration::from_millis(500), engine.run().wait()).await?;
@@ -124,13 +122,10 @@ async fn test_shutdown_aborts_a_stuck_consumer_after_timeout() -> anyhow::Result
     let dropped = Arc::new(AtomicBool::new(false));
     let engine = SyncEngine::builder(Arc::new(TestStatusStore::new(0)))
         .with_shutdown_timeout(Duration::from_millis(20))?
-        .add_height_provider(
-            PendingHeightLoader {
-                started: started.clone(),
-                dropped: dropped.clone(),
-            }
-            .into(),
-        )?
+        .add_height_provider(PendingHeightLoader {
+            started: started.clone(),
+            dropped: dropped.clone(),
+        })?
         .build();
 
     let run_handle = engine.run();

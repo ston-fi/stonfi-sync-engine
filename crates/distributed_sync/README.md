@@ -39,13 +39,13 @@ use stonfi_distributed_sync::traits::DistributedHandler;
 use stonfi_distributed_sync::coordinator::Coordinator;
 use stonfi_distributed_sync::task_server::{TaskServer, TaskServerRunHandle};
 use stonfi_distributed_sync::worker::{Worker, WorkerRunHandle};
-use stonfi_sync_core::sync_engine::Synchronizer;
+use stonfi_sync_core::sync_engine::{SyncHandler, Synchronizer};
 
 async fn build_runtime<H>(
     coordinator_handler: H,
     worker_handler: H,
     listen_address: SocketAddr,
-) -> anyhow::Result<(Synchronizer, WorkerRunHandle, TaskServerRunHandle)>
+) -> anyhow::Result<(impl SyncHandler + Into<Synchronizer>, WorkerRunHandle, TaskServerRunHandle)>
 where
     H: DistributedHandler,
 {
@@ -69,10 +69,11 @@ where
 Workers use [`std::thread::available_parallelism`] by default. Call
 `with_parallelism` only when the application needs an explicit limit.
 
-Call `into_sync` on the coordinator-side handler and register the returned
-`Synchronizer` with `stonfi_sync_core::SyncEngine`. Register separately
-constructed handlers with workers; handler state is local to each process. On
-shutdown, stop the core engine before the worker and server. See
+Call `into_sync` on the coordinator-side handler and pass the returned adapter
+directly to `stonfi_sync_core::SyncEngine`'s builder. Convert it into a
+`Synchronizer` first only when another handler depends on its progress. Register
+separately constructed handlers with workers; handler state is local to each
+process. On shutdown, stop the core engine before the worker and server. See
 [`examples/distributed.rs`](examples/distributed.rs) for the complete workflow.
 Initial-height configuration belongs to the core `SyncStatusStore`; distributed
 handlers define task behavior only.
