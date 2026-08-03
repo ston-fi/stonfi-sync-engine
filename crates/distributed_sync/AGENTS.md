@@ -138,12 +138,12 @@ initialization. Constructors must not initialize individual metric cells or add
 redundant availability checks. Keep worker IDs out of labels and preserve these
 released names and label sets:
 
-- `stonfi_distributed_sync_coordinator_tasks_total{sync_id,status}`
-- `stonfi_distributed_sync_coordinator_task_duration_ms{sync_id,status}`
+- `stonfi_distributed_sync_coordinator_tasks_total{handler_id,status}`
+- `stonfi_distributed_sync_coordinator_task_duration_ms{handler_id,status}`
 - `stonfi_distributed_sync_coordinator_queue_size{kind}`
 - `stonfi_distributed_sync_worker_polls_total{outcome}`
-- `stonfi_distributed_sync_worker_tasks_total{sync_id,status}`
-- `stonfi_distributed_sync_worker_task_duration_ms{sync_id,status}`
+- `stonfi_distributed_sync_worker_tasks_total{handler_id,status}`
+- `stonfi_distributed_sync_worker_task_duration_ms{handler_id,status}`
 - `stonfi_distributed_sync_server_requests_total{method,status}`
 - `stonfi_distributed_sync_server_request_duration_ms{method,status}`
 

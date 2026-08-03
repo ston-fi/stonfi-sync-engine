@@ -19,7 +19,7 @@ Use this crate when a service must:
 - observe lifecycle events through callbacks and Prometheus collectors.
 
 It is not a distributed lock or multi-writer coordination system. Only one
-active engine may write a given sync ID. Distributed task transport is also
+active engine may write a given handler ID. Distributed task transport is also
 outside this crate; it belongs in a separate workspace package so the core
 engine remains independent of gRPC, protobuf code generation, and worker
 infrastructure.
@@ -91,13 +91,15 @@ store with the fallback selected by application configuration; for example,
 starts, [`SyncStatusStore::load_synced_or_initial`] resolves state in this
 order:
 
-1. the synchronizer's own persisted ID;
-2. the persisted [`INITIAL_SYNC_ID`] value; or
-3. the store's configured fallback, saved under `INITIAL_SYNC_ID` before it is
+1. the synchronizer handler's own persisted ID;
+2. the persisted [`INITIAL_HEIGHT`] value; or
+3. the store's configured fallback, saved under `INITIAL_HEIGHT` before it is
    returned.
 
-`INITIAL_SYNC_ID` is reserved storage state. It cannot be registered as a
-height provider or synchronizer and never participates in the dependency graph.
+`INITIAL_HEIGHT` is the reserved initial-height key in the handler-ID namespace.
+Status stores receive it through their `handler_id` arguments, but it cannot be
+registered as a height loader or sync handler and never participates in the
+dependency graph.
 Only one active engine may initialize or write it because status stores do not
 provide compare-and-set coordination.
 
@@ -179,7 +181,7 @@ collectors themselves; metric access before startup initialization panics by
 design.
 
 All engine metric series identify their height provider or synchronizer with
-the `component_id` label.
+the `handler_id` label.
 
 Height gauges use unsigned `u64` storage. Prometheus exposes numeric samples as
 `f64`, so scraped height values above `2^53` may lose unit precision; engine
@@ -217,7 +219,7 @@ cargo package --list --locked -p stonfi_sync_core
 [`SyncEngine::run`]: crate::sync_engine::SyncEngine::run
 [`SyncHandler`]: crate::sync_engine::SyncHandler
 [`SyncHandler::sync_range`]: crate::sync_engine::SyncHandler::sync_range
-[`INITIAL_SYNC_ID`]: crate::sync_engine::INITIAL_SYNC_ID
+[`INITIAL_HEIGHT`]: crate::sync_engine::INITIAL_HEIGHT
 [`HeightLoader`]: crate::sync_engine::HeightLoader
 [`SyncStatusStore`]: crate::sync_engine::SyncStatusStore
 [`SyncStatusStore::initial_synced_height`]: crate::sync_engine::SyncStatusStore::initial_synced_height

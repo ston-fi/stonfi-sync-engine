@@ -2,7 +2,7 @@ use super::_test_support::*;
 use super::*;
 
 #[tokio::test]
-async fn test_builder_rejects_duplicate_component_ids() -> anyhow::Result<()> {
+async fn test_builder_rejects_duplicate_handler_ids() -> anyhow::Result<()> {
     init_test_runtime()?;
 
     let height_provider: HeightProvider = TestHeightLoader::new("test_init_dup_sync", 5).into();
@@ -12,7 +12,7 @@ async fn test_builder_rejects_duplicate_component_ids() -> anyhow::Result<()> {
 
     let builder = SyncEngine::builder(status_store).add_synchronizer(sync_1, &[&height_provider])?;
     let err = match builder.add_synchronizer(sync_2, &[&height_provider]) {
-        Ok(_) => return Err(anyhow::anyhow!("duplicate component ID should fail")),
+        Ok(_) => return Err(anyhow::anyhow!("duplicate handler ID should fail")),
         Err(err) => err,
     };
     assert!(matches!(err, SyncCoreError::Logic(_)));
@@ -35,18 +35,18 @@ async fn test_builder_rejects_duplicate_component_ids() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
-async fn test_builder_rejects_reserved_component_id() -> anyhow::Result<()> {
+async fn test_builder_rejects_reserved_handler_id() -> anyhow::Result<()> {
     init_test_runtime()?;
 
     let status_store = Arc::new(TestStatusStore::new(0));
-    let height_provider: HeightProvider = TestHeightLoader::new(INITIAL_SYNC_ID, 5).into();
+    let height_provider: HeightProvider = TestHeightLoader::new(INITIAL_HEIGHT, 5).into();
     assert!(matches!(
         SyncEngine::builder(status_store.clone()).add_height_provider(height_provider),
         Err(SyncCoreError::InvalidArgs(_))
     ));
 
     let progress_provider: HeightProvider = TestHeightLoader::new("reserved_id_progress", 5).into();
-    let synchronizer = TestSync::new(INITIAL_SYNC_ID, 5).into();
+    let synchronizer = TestSync::new(INITIAL_HEIGHT, 5).into();
     assert!(matches!(
         SyncEngine::builder(status_store).add_synchronizer(synchronizer, &[&progress_provider]),
         Err(SyncCoreError::InvalidArgs(_))

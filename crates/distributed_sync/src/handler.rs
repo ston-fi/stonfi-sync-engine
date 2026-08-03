@@ -3,24 +3,22 @@ use std::time::Duration;
 use stonfi_sync_core::errors::SyncCoreResult;
 use stonfi_sync_core::sync_engine::SyncHeight;
 
-/// Serialization contract for task and result payloads sent over gRPC.
+/// Deterministic task and result serialization for gRPC transport.
 ///
-/// Implementations must be deterministic and must reject malformed input.
-/// Coordinator and worker binaries must use compatible implementations.
+/// Coordinators and workers must use compatible codecs.
 pub trait TaskPayload: Send + Sized + 'static {
     /// Serializes this value for transport.
     ///
     /// # Errors
     ///
-    /// Returns an error when the value cannot be represented by the codec.
+    /// Returns an error when encoding fails.
     fn encode(&self) -> SyncCoreResult<Vec<u8>>;
 
-    /// Deserializes one complete transport payload.
+    /// Decodes one complete payload and rejects malformed or trailing data.
     ///
     /// # Errors
     ///
-    /// Returns an error when the payload is malformed, incomplete, or contains
-    /// data that the implementation does not accept.
+    /// Returns an error when decoding fails.
     fn decode(data: &[u8]) -> SyncCoreResult<Self>;
 }
 
@@ -35,10 +33,8 @@ pub struct TaskBatch<T> {
 impl<T> TaskBatch<T> {
     /// Creates a batch whose successful completion advances to `synced_height`.
     ///
-    /// An empty task list is valid and advances after
-    /// [`DistributedSyncHandler::handle_results`] accepts an empty result list.
-    /// At most 10,000 tasks from one list are submitted concurrently while
-    /// preserving this vector's result order.
+    /// Empty batches are valid. At most 10,000 tasks run concurrently and
+    /// results preserve this vector's order.
     pub fn new(synced_height: SyncHeight, tasks: Vec<T>) -> Self {
         Self { synced_height, tasks }
     }
@@ -62,12 +58,8 @@ impl<T> TaskBatch<T> {
 
 /// Defines coordinator-side task creation and worker-side task processing.
 ///
-/// The same handler type is registered with the coordinator adapter and the
-/// workers intended to process it. Workers may still receive tasks for
-/// unregistered handlers and report them as retryable failures. The handler is
-/// shared through [`std::sync::Arc`], and `process_task` can run concurrently.
-/// Task processing is at-least-once: implementations must make externally
-/// visible effects idempotent.
+/// Register the same handler with the coordinator adapter and workers. Task
+/// processing is concurrent and at-least-once, so effects must be idempotent.
 #[async_trait::async_trait]
 pub trait DistributedSyncHandler: Send + Sync + 'static {
     /// Task payload sent to workers.
@@ -75,36 +67,32 @@ pub trait DistributedSyncHandler: Send + Sync + 'static {
     /// Result payload returned to the coordinator.
     type TaskResult: TaskPayload;
 
-    /// Returns the stable ID used for routing, logging, metrics, and status.
+    /// Returns the stable handler ID used for routing, logging, metrics, and status.
     fn id(&self) -> &str;
 
     /// Creates tasks for the inclusive engine range `[from, to]`.
     ///
-    /// Return `Ok(None)` to ignore the range without advancing. Task results are
-    /// supplied to [`Self::handle_results`] in the same order as this batch.
+    /// `Ok(None)` ignores the range. Results preserve batch order.
     ///
     /// # Errors
     ///
-    /// Returns a consumer error when task construction cannot complete.
+    /// Returns an error when task creation fails.
     async fn create_tasks(&self, from: SyncHeight, to: SyncHeight) -> SyncCoreResult<Option<TaskBatch<Self::Task>>>;
 
     /// Processes one task on a worker.
     ///
-    /// This method can execute concurrently and can be called again after an
-    /// ambiguous completion or failure.
+    /// Calls may run concurrently and repeat after ambiguous completion.
     ///
     /// # Errors
     ///
-    /// Returns an error that the coordinator treats as a retryable task failure
-    /// until the enclosing synchronization attempt times out.
+    /// Returns a retryable error bounded by the synchronization timeout.
     async fn process_task(&self, task: Self::Task) -> SyncCoreResult<Self::TaskResult>;
 
     /// Validates or persists the ordered results before height advancement.
     ///
     /// # Errors
     ///
-    /// Returns an error to reject the batch and let `stonfi_sync_core` retry the
-    /// synchronization range.
+    /// Returns an error to reject and retry the range.
     async fn handle_results(&self, _synced_height: SyncHeight, _results: Vec<Self::TaskResult>) -> SyncCoreResult<()> {
         Ok(())
     }

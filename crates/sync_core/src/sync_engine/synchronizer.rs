@@ -72,7 +72,6 @@ impl Synchronizer {
             }
 
             let next_height = tokio::select! {
-                biased;
                 _ = ctx.cancellation.cancelled() => break,
                 height = ctx.receiver.wait_after(wait_after_height) => height,
             };

@@ -39,8 +39,8 @@ async fn test_sync_respects_fixed_batch_size() -> anyhow::Result<()> {
     let height_provider: HeightProvider = TestHeightLoader::new("test_init1_ranged", 5).into();
     let status_store = Arc::new(TestStatusStore::new(0));
 
-    let sync_id = "sync_ranged".to_string();
-    let sync = TestSyncRanged::new(&sync_id, 20).into();
+    let id = "sync_ranged".to_string();
+    let sync = TestSyncRanged::new(&id, 20).into();
 
     let engine = SyncEngine::builder(status_store.clone())
         .add_synchronizer(sync, &[&height_provider])?
@@ -52,9 +52,9 @@ async fn test_sync_respects_fixed_batch_size() -> anyhow::Result<()> {
     let sync_statuses = status_store
         .storage
         .read()
-        .get(&sync_id)
+        .get(&id)
         .cloned()
-        .ok_or_else(|| anyhow::anyhow!("missing statuses for {sync_id}"))?;
+        .ok_or_else(|| anyhow::anyhow!("missing statuses for {id}"))?;
     let mut expected_height = 0;
     for height in &sync_statuses {
         expected_height += 5;
@@ -69,8 +69,8 @@ async fn test_success_callbacks_are_invoked() -> anyhow::Result<()> {
     let height_provider: HeightProvider = TestHeightLoader::new("test_init1_callback", 5).into();
     let status_store = Arc::new(TestStatusStore::new(0));
 
-    let sync_id = "sync_callback".to_string();
-    let sync = TestSyncRanged::new(&sync_id, 20).into();
+    let id = "sync_callback".to_string();
+    let sync = TestSyncRanged::new(&id, 20).into();
 
     const LOADED: usize = 1;
     const PUBLISHED: usize = 1 << 1;
@@ -153,11 +153,11 @@ async fn test_partial_sync_propagates_processed_height_to_children() -> anyhow::
     let height_provider: HeightProvider = TestHeightLoader::new("test_init_partial", 2).into();
     let status_store = Arc::new(TestStatusStore::new(0));
 
-    let sync_a_id = "sync_parent_partial".to_string();
-    let sync_b_id = "sync_child_partial".to_string();
-    let sync_a: Synchronizer = TestSyncPartial::new(&sync_a_id, 1).into();
+    let parent_id = "sync_parent_partial".to_string();
+    let child_id = "sync_child_partial".to_string();
+    let sync_a: Synchronizer = TestSyncPartial::new(&parent_id, 1).into();
     let sync_a_progress = TestProgressProvider(sync_a.subscribe());
-    let sync_b = TestSync::new(&sync_b_id, 1).into();
+    let sync_b = TestSync::new(&child_id, 1).into();
 
     let engine = SyncEngine::builder(status_store.clone())
         .add_synchronizer(sync_a, &[&height_provider])?
@@ -169,13 +169,13 @@ async fn test_partial_sync_propagates_processed_height_to_children() -> anyhow::
     shutdown_engine_after(run_handle, Duration::from_millis(400)).await?;
 
     let parent_height = status_store
-        .load_synced_height(&sync_a_id)
+        .load_synced_height(&parent_id)
         .await?
-        .ok_or_else(|| anyhow::anyhow!("missing synced height for {sync_a_id}"))?;
+        .ok_or_else(|| anyhow::anyhow!("missing synced height for {parent_id}"))?;
     let child_height = status_store
-        .load_synced_height(&sync_b_id)
+        .load_synced_height(&child_id)
         .await?
-        .ok_or_else(|| anyhow::anyhow!("missing synced height for {sync_b_id}"))?;
+        .ok_or_else(|| anyhow::anyhow!("missing synced height for {child_id}"))?;
     assert!(parent_height > 0);
     assert!(child_height > 0);
     assert!(child_height <= parent_height);
@@ -233,13 +233,13 @@ async fn test_ignored_range() -> anyhow::Result<()> {
     let status_store = Arc::new(TestStatusStore::new(0));
     let parent_calls = Arc::new(AtomicUsize::new(0));
     let parent_ranges = Arc::new(Mutex::new(vec![]));
-    let parent_sync_id = "sync_ignore_parent".to_string();
-    let child_sync_id = "sync_ignore_child".to_string();
+    let parent_id = "sync_ignore_parent".to_string();
+    let child_id = "sync_ignore_child".to_string();
 
     let parent_sync: Synchronizer =
-        TestIgnoreThenSync::new(&parent_sync_id, parent_calls.clone(), parent_ranges.clone()).into();
+        TestIgnoreThenSync::new(&parent_id, parent_calls.clone(), parent_ranges.clone()).into();
     let parent_progress = TestProgressProvider(parent_sync.subscribe());
-    let child_sync = TestSync::new(&child_sync_id, 1).into();
+    let child_sync = TestSync::new(&child_id, 1).into();
 
     let (progress_tx, progress_rx) = tokio::sync::watch::channel(0);
     let progress_provider = TestProgressProvider(progress_rx);
@@ -255,8 +255,8 @@ async fn test_ignored_range() -> anyhow::Result<()> {
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     assert_eq!(1, parent_calls.load(Ordering::SeqCst));
-    assert_eq!(None, status_store.load_synced_height(&parent_sync_id).await?);
-    assert_eq!(None, status_store.load_synced_height(&child_sync_id).await?);
+    assert_eq!(None, status_store.load_synced_height(&parent_id).await?);
+    assert_eq!(None, status_store.load_synced_height(&child_id).await?);
 
     progress_tx.send(6)?;
     tokio::time::sleep(Duration::from_millis(150)).await;
@@ -267,8 +267,8 @@ async fn test_ignored_range() -> anyhow::Result<()> {
     // The configured range limits intentionally produce this sequence.
     assert_eq!(3, parent_calls.load(Ordering::SeqCst));
     assert_eq!(vec![(1, 3), (1, 4), (5, 6)], *parent_ranges.lock());
-    assert_eq!(Some(6), status_store.load_synced_height(&parent_sync_id).await?);
-    assert!(status_store.load_synced_height(&child_sync_id).await?.unwrap_or_default() > 0);
+    assert_eq!(Some(6), status_store.load_synced_height(&parent_id).await?);
+    assert!(status_store.load_synced_height(&child_id).await?.unwrap_or_default() > 0);
     Ok(())
 }
 
@@ -297,9 +297,9 @@ async fn test_reenabled_sync_uses_existing_upstream_height() -> anyhow::Result<(
     }
 
     let enabled = Arc::new(AtomicBool::new(false));
-    let sync_id = "reenabled_sync".to_string();
+    let id = "reenabled_sync".to_string();
     let sync: Synchronizer = EnabledSync {
-        id: sync_id.clone(),
+        id: id.clone(),
         enabled: enabled.clone(),
     }
     .into();
@@ -314,7 +314,7 @@ async fn test_reenabled_sync_uses_existing_upstream_height() -> anyhow::Result<(
     tokio::time::sleep(Duration::from_millis(50)).await;
     enabled.store(true, Ordering::SeqCst);
     tokio::time::timeout(Duration::from_millis(1500), async {
-        while status_store.load_synced_height(&sync_id).await? != Some(1) {
+        while status_store.load_synced_height(&id).await? != Some(1) {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         Ok::<(), SyncCoreError>(())
@@ -374,8 +374,8 @@ async fn test_on_sync_error_callback_is_invoked() -> anyhow::Result<()> {
     let height_provider: HeightProvider = TestHeightLoader::new("test_init_sync_error_callback", 2).into();
     let status_store = Arc::new(TestStatusStore::new(0));
     let attempts = Arc::new(AtomicUsize::new(0));
-    let sync_id = "sync_error_callback".to_string();
-    let sync = TestSyncFailFirst::new(&sync_id, attempts).into();
+    let id = "sync_error_callback".to_string();
+    let sync = TestSyncFailFirst::new(&id, attempts).into();
     let sync_error_calls = Arc::new(AtomicUsize::new(0));
     let callback = Arc::new(TestSyncErrorCallback {
         calls: sync_error_calls.clone(),
@@ -430,8 +430,8 @@ async fn test_invalid_synced_height_is_retried_and_not_saved() -> anyhow::Result
     let height_provider: HeightProvider = TestHeightLoader::new("test_init_invalid_height", 2).into();
     let status_store = Arc::new(TestStatusStore::new(0));
     let sync_calls = Arc::new(AtomicUsize::new(0));
-    let sync_id = "sync_invalid_height".to_string();
-    let sync = TestSyncInvalidFirst::new(&sync_id, sync_calls.clone()).into();
+    let id = "sync_invalid_height".to_string();
+    let sync = TestSyncInvalidFirst::new(&id, sync_calls.clone()).into();
 
     let engine = SyncEngine::builder(status_store.clone())
         .add_synchronizer(sync, &[&height_provider])?
@@ -441,7 +441,7 @@ async fn test_invalid_synced_height_is_retried_and_not_saved() -> anyhow::Result
     let run_handle = engine.run();
     shutdown_engine_after(run_handle, Duration::from_millis(400)).await?;
 
-    let statuses = status_store.storage.read().get(&sync_id).cloned().unwrap_or_default();
+    let statuses = status_store.storage.read().get(&id).cloned().unwrap_or_default();
     assert!(!statuses.is_empty());
     assert_eq!(1, statuses[0]);
     assert!(sync_calls.load(Ordering::SeqCst) >= 2);
@@ -558,8 +558,8 @@ async fn test_allow_rewind_accepts_rewound_height_without_retry() -> anyhow::Res
 
     let status_store = Arc::new(TestStatusStore::new(0));
     let sync_calls = Arc::new(AtomicUsize::new(0));
-    let sync_id = "sync_allow_rewind".to_string();
-    let sync = TestRewindSync::new(&sync_id, sync_calls.clone()).into();
+    let id = "sync_allow_rewind".to_string();
+    let sync = TestRewindSync::new(&id, sync_calls.clone()).into();
     let (progress_tx, progress_rx) = tokio::sync::watch::channel(1);
     let progress_provider = TestProgressProvider(progress_rx);
     let callback = Arc::new(StopAfterFirstSyncCallback {
@@ -574,7 +574,7 @@ async fn test_allow_rewind_accepts_rewound_height_without_retry() -> anyhow::Res
     let run_handle = engine.run();
     shutdown_engine_after(run_handle, Duration::from_millis(200)).await?;
 
-    let statuses = status_store.storage.read().get(&sync_id).cloned().unwrap_or_default();
+    let statuses = status_store.storage.read().get(&id).cloned().unwrap_or_default();
     assert_eq!(vec![0], statuses);
     assert_eq!(1, sync_calls.load(Ordering::SeqCst));
     Ok(())
@@ -619,8 +619,8 @@ async fn test_rewound_height_is_retried_when_allow_rewind_is_false() -> anyhow::
     let height_provider: HeightProvider = TestHeightLoader::new("test_init_no_rewind", 2).into();
     let status_store = Arc::new(TestStatusStore::new(0));
     let sync_calls = Arc::new(AtomicUsize::new(0));
-    let sync_id = "sync_no_rewind".to_string();
-    let sync = TestNoRewindSync::new(&sync_id, sync_calls.clone()).into();
+    let id = "sync_no_rewind".to_string();
+    let sync = TestNoRewindSync::new(&id, sync_calls.clone()).into();
 
     let engine = SyncEngine::builder(status_store.clone())
         .add_synchronizer(sync, &[&height_provider])?
@@ -631,7 +631,7 @@ async fn test_rewound_height_is_retried_when_allow_rewind_is_false() -> anyhow::
     let run_handle = engine.run();
     shutdown_engine_after(run_handle, Duration::from_millis(400)).await?;
 
-    let statuses = status_store.storage.read().get(&sync_id).cloned().unwrap_or_default();
+    let statuses = status_store.storage.read().get(&id).cloned().unwrap_or_default();
     assert!(!statuses.is_empty());
     assert_eq!(1, statuses[0]);
     assert!(sync_calls.load(Ordering::SeqCst) >= 2);
@@ -758,8 +758,8 @@ async fn test_missing_persisted_height_uses_and_stores_configured_initial_height
     init_test_runtime()?;
     let height_provider: HeightProvider = TestHeightLoader::new("test_init_initial_height", 2).into();
     let status_store = Arc::new(TestStatusStore::new(7));
-    let sync_id = "sync_initial_height".to_string();
-    let sync = TestSync::new(&sync_id, 0).into();
+    let id = "sync_initial_height".to_string();
+    let sync = TestSync::new(&id, 0).into();
 
     let engine = SyncEngine::builder(status_store.clone())
         .add_synchronizer(sync, &[&height_provider])?
@@ -769,17 +769,17 @@ async fn test_missing_persisted_height_uses_and_stores_configured_initial_height
     let run_handle = engine.run();
     shutdown_engine_after(run_handle, Duration::from_millis(250)).await?;
 
-    let statuses = status_store.storage.read().get(&sync_id).cloned().unwrap_or_default();
+    let statuses = status_store.storage.read().get(&id).cloned().unwrap_or_default();
     assert!(!statuses.is_empty());
     assert_eq!(8, statuses[0]);
-    assert_eq!(Some(7), status_store.load_synced_height(INITIAL_SYNC_ID).await?);
+    assert_eq!(Some(7), status_store.load_synced_height(INITIAL_HEIGHT).await?);
     Ok(())
 }
 
 #[tokio::test]
 async fn test_persisted_sync_and_initial_heights_take_precedence_over_config() -> anyhow::Result<()> {
     let status_store = TestStatusStore::new(99);
-    status_store.save_synced_height(INITIAL_SYNC_ID, 7).await?;
+    status_store.save_synced_height(INITIAL_HEIGHT, 7).await?;
 
     assert_eq!(7, status_store.load_synced_or_initial("missing_sync").await?);
 
@@ -802,7 +802,7 @@ async fn test_initial_height_save_failure_is_retried() -> anyhow::Result<()> {
     shutdown_engine_after(engine.run(), Duration::from_millis(500)).await?;
 
     assert_eq!(0, status_store.initial_save_failures.load(Ordering::SeqCst));
-    assert_eq!(Some(3), status_store.load_synced_height(INITIAL_SYNC_ID).await?);
+    assert_eq!(Some(3), status_store.load_synced_height(INITIAL_HEIGHT).await?);
     assert!(status_store.load_synced_height("initial_save_retry_sync").await?.is_some());
     Ok(())
 }

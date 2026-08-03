@@ -63,30 +63,30 @@ struct ExampleCallback;
 impl SyncCallback for ExampleCallback {
     async fn on_height_loaded(
         &self,
-        component_id: &str,
+        handler_id: &str,
         prev_height: SyncHeight,
         next_height: SyncHeight,
     ) -> SyncCoreResult<()> {
         if next_height <= prev_height {
             return Ok(());
         }
-        tracing::info!("callback: height provider {component_id} advanced from {prev_height} to {next_height}");
+        tracing::info!("callback: height provider {handler_id} advanced from {prev_height} to {next_height}");
         Ok(())
     }
 
-    async fn on_sync_start(&self, component_id: &str, from: SyncHeight, to: SyncHeight) -> SyncCoreResult<()> {
-        tracing::info!("callback: sync {component_id} started range [{from}, {to}]");
+    async fn on_sync_start(&self, handler_id: &str, from: SyncHeight, to: SyncHeight) -> SyncCoreResult<()> {
+        tracing::info!("callback: sync {handler_id} started range [{from}, {to}]");
         Ok(())
     }
 
     async fn on_sync_complete(
         &self,
-        component_id: &str,
+        handler_id: &str,
         from: SyncHeight,
         to: SyncHeight,
         processed_to: SyncHeight,
     ) -> SyncCoreResult<()> {
-        tracing::info!("callback: sync {component_id} finished requested [{from}, {to}] and committed {processed_to}");
+        tracing::info!("callback: sync {handler_id} finished requested [{from}, {to}] and committed {processed_to}");
         Ok(())
     }
 }

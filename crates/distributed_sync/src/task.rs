@@ -3,11 +3,7 @@ use bincode::{Decode, Encode};
 use stonfi_sync_core::errors::{SyncCoreError, SyncCoreResult};
 use stonfi_sync_core::sync_engine::SyncHeight;
 
-/// A passive task describing an inclusive height range.
-///
-/// The public fields are an intentional serialization contract. Consumers that
-/// need a different task shape should implement [`TaskPayload`] on their own
-/// type.
+/// A serializable inclusive height range.
 #[derive(Debug, Clone, PartialEq, Eq, Encode, Decode)]
 pub struct RangeTask {
     /// First height in the inclusive range.

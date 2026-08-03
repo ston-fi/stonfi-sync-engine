@@ -67,7 +67,7 @@ access the registered cells directly and therefore panic if startup skipped
 initialization. Do not initialize individual metric cells from engine
 constructors, add redundant availability checks, reintroduce per-engine
 collector APIs, or expose Prometheus types publicly.
-All engine metric series use `component_id` for the height-provider or
+All engine metric series use `handler_id` for the height-provider or
 synchronizer identifier label.
 Height gauges store `u64`, but Prometheus exposition converts numeric samples
 to `f64` and may lose unit precision above `2^53`; this does not narrow the
@@ -75,18 +75,19 @@ engine or status-store height domain.
 
 ## Invariants and pitfalls
 
-- Every height provider and synchronizer component ID must be unique within one
+- Every height loader and sync handler ID must be unique within one
   engine.
 - Dependency graphs must be acyclic. The builder subscribes to providers but
   does not perform graph discovery or cycle detection.
-- `INITIAL_SYNC_ID` (`"INITIAL"`) is reserved for the status store's durable
-  engine-wide baseline and must never identify a height provider, synchronizer,
-  or dependency-graph entity.
-- Only one active engine may write a given sync ID. The status-store API is
-  not compare-and-set storage; this also applies to `INITIAL_SYNC_ID`.
-- `SyncStatusStore::load_synced_or_initial` prefers per-sync state, then the
-  persisted `INITIAL` state, and only then stores and returns the configured
-  fallback.
+- `INITIAL_HEIGHT` (`"INITIAL_HEIGHT"`) is the reserved initial-height key in
+  the handler-ID namespace. Status stores receive it through their `handler_id`
+  arguments, but it must never identify a height provider, synchronizer, or
+  dependency-graph entity.
+- Only one active engine may write a given handler ID. The status-store API is
+  not compare-and-set storage; this also applies to `INITIAL_HEIGHT`.
+- `SyncStatusStore::load_synced_or_initial` prefers per-handler state, then the
+  persisted `INITIAL_HEIGHT` state, and only then stores and returns the
+  configured fallback.
 - `SyncHeight` is `u64`; height `0` remains the initial no-progress sentinel.
 - Batch sizes are positive, fit in `SyncHeight`, and satisfy `min <= max`.
 - `sync_range(from, to)` processes an inclusive range and may report only a

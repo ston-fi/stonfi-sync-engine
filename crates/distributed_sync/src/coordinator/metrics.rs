@@ -29,12 +29,12 @@ impl CoordinatorMetrics {
             tasks: prometheus::register_int_counter_vec!(
                 "stonfi_distributed_sync_coordinator_tasks_total",
                 "Distributed coordinator task outcomes",
-                &["sync_id", "status"],
+                &["handler_id", "status"],
             )?,
             task_duration_ms: prometheus::register_histogram_vec!(
                 "stonfi_distributed_sync_coordinator_task_duration_ms",
                 "Distributed coordinator task duration in milliseconds",
-                &["sync_id", "status"],
+                &["handler_id", "status"],
                 DURATION_BUCKETS_1MS_20S.clone(),
             )?,
             queue_size: prometheus::register_int_gauge_vec!(
@@ -45,19 +45,19 @@ impl CoordinatorMetrics {
         })
     }
 
-    pub(super) fn queued(sync_id: &str) {
+    pub(super) fn queued(id: &str) {
         METRICS
             .tasks
-            .with_label_values(&[sync_id, CoordinatorTaskStatus::Queued.into()])
+            .with_label_values(&[id, CoordinatorTaskStatus::Queued.into()])
             .inc();
     }
 
-    pub(super) fn complete(sync_id: &str, status: CoordinatorTaskStatus, duration: Duration) {
+    pub(super) fn complete(id: &str, status: CoordinatorTaskStatus, duration: Duration) {
         let status: &'static str = status.into();
-        METRICS.tasks.with_label_values(&[sync_id, status]).inc();
+        METRICS.tasks.with_label_values(&[id, status]).inc();
         METRICS
             .task_duration_ms
-            .with_label_values(&[sync_id, status])
+            .with_label_values(&[id, status])
             .observe(format_duration_ms(duration));
     }
 

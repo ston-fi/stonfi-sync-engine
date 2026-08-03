@@ -3,7 +3,7 @@ use crate::sync_engine::height_provider::HeightProvider;
 use crate::sync_engine::progress::MultiReceiver;
 use crate::sync_engine::synchronizer::Synchronizer;
 use crate::sync_engine::traits::ProgressProvider;
-use crate::sync_engine::{INITIAL_SYNC_ID, SyncCallback, SyncEngine, SyncHeight, SyncStatusStore};
+use crate::sync_engine::{INITIAL_HEIGHT, SyncCallback, SyncEngine, SyncHeight, SyncStatusStore};
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -38,18 +38,14 @@ impl Builder {
     ///
     /// # Errors
     ///
-    /// Returns an error when the height provider ID is empty, has edge whitespace,
-    /// equals the reserved `INITIAL_SYNC_ID`, or duplicates another registered
-    /// component ID.
-    pub fn add_height_provider(mut self, height_provider: HeightProvider) -> SyncCoreResult<Self> {
-        let component_id = height_provider.id().to_owned();
-        validate_component_id(&component_id)?;
-        if !self.registered_ids.insert(component_id.clone()) {
-            return Err(SyncCoreError::logic(format!(
-                "Sync component with id {component_id} is already registered"
-            )));
+    /// Returns an error when the handler ID is invalid, reserved, or duplicated.
+    pub fn add_height_provider(mut self, provider: HeightProvider) -> SyncCoreResult<Self> {
+        let id = provider.id().to_owned();
+        validate_id(&id)?;
+        if !self.registered_ids.insert(id.clone()) {
+            return Err(SyncCoreError::logic(format!("handler ID {id} is already registered")));
         }
-        self.height_providers.push(height_provider);
+        self.height_providers.push(provider);
         Ok(self)
     }
 
@@ -57,12 +53,11 @@ impl Builder {
     ///
     /// # Errors
     ///
-    /// Returns an error for an empty, edge-whitespace, or reserved
-    /// `INITIAL_SYNC_ID`, missing progress providers, duplicate IDs, or invalid range
-    /// limits.
+    /// Returns an error for an invalid, reserved, or duplicate handler ID,
+    /// missing progress providers, or invalid range limits.
     pub fn add_synchronizer(mut self, sync: Synchronizer, providers: &[&dyn ProgressProvider]) -> SyncCoreResult<Self> {
-        let component_id = sync.handler.id().to_owned();
-        validate_component_id(&component_id)?;
+        let id = sync.handler.id().to_owned();
+        validate_id(&id)?;
         let min_batch_size = sync.handler.min_batch_size();
         let max_batch_size = sync.handler.max_batch_size();
         if min_batch_size == 0
@@ -72,13 +67,13 @@ impl Builder {
             || SyncHeight::try_from(max_batch_size).is_err()
         {
             let err_msg = format!(
-                "Synchronizer {component_id} has invalid batch size: min_batch_size={min_batch_size}, max_batch_size={max_batch_size}"
+                "Synchronizer {id} has invalid batch size: min_batch_size={min_batch_size}, max_batch_size={max_batch_size}"
             );
             return Err(SyncCoreError::Logic(err_msg));
         }
 
-        if !self.registered_ids.insert(component_id.clone()) {
-            let err_msg = format!("Sync component with id {component_id} is already registered");
+        if !self.registered_ids.insert(id.clone()) {
+            let err_msg = format!("handler ID {id} is already registered");
             return Err(SyncCoreError::Logic(err_msg));
         }
 
@@ -133,18 +128,18 @@ impl Builder {
     }
 }
 
-fn validate_component_id(component_id: &str) -> SyncCoreResult<()> {
-    if component_id.is_empty() {
-        return Err(SyncCoreError::invalid_args("component ID must not be empty"));
+fn validate_id(id: &str) -> SyncCoreResult<()> {
+    if id.is_empty() {
+        return Err(SyncCoreError::invalid_args("handler ID must not be empty"));
     }
-    if component_id.trim() != component_id {
+    if id.trim() != id {
         return Err(SyncCoreError::invalid_args(
-            "component ID must not have leading or trailing whitespace",
+            "handler ID must not have leading or trailing whitespace",
         ));
     }
-    if component_id == INITIAL_SYNC_ID {
+    if id == INITIAL_HEIGHT {
         return Err(SyncCoreError::invalid_args(format!(
-            "component ID {INITIAL_SYNC_ID} is reserved for the initial synced height"
+            "handler ID {INITIAL_HEIGHT} is reserved for the initial synced height"
         )));
     }
     Ok(())

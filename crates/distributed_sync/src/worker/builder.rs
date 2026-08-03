@@ -43,10 +43,7 @@ impl Builder {
         }
     }
 
-    /// Overrides the maximum number of concurrently processed tasks.
-    ///
-    /// By default, [`std::thread::available_parallelism`] determines this value
-    /// when the worker is built.
+    /// Overrides task parallelism, which defaults to available CPU parallelism.
     #[must_use]
     pub fn with_parallelism(mut self, parallelism: NonZeroUsize) -> Self {
         self.parallelism = Some(parallelism);
@@ -90,15 +87,13 @@ impl Builder {
     where
         H: DistributedSyncHandler,
     {
-        let handler_id = handler.id().to_owned();
-        match self.handlers.entry(handler_id.clone()) {
+        let id = handler.id().to_owned();
+        match self.handlers.entry(id.clone()) {
             Entry::Vacant(entry) => {
                 entry.insert(handler);
                 Ok(self)
             },
-            Entry::Occupied(_) => Err(SyncCoreError::logic(format!(
-                "worker handler '{handler_id}' is already registered"
-            ))),
+            Entry::Occupied(_) => Err(SyncCoreError::logic(format!("worker handler '{id}' is already registered"))),
         }
     }
 

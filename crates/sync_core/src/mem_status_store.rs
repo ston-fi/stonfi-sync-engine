@@ -31,13 +31,13 @@ impl SyncStatusStore for MemStatusStore {
         self.initial_synced_height
     }
 
-    async fn save_synced_height(&self, sync_id: &str, sync_height: SyncHeight) -> SyncCoreResult<()> {
-        self.storage.write().insert(sync_id.to_owned(), sync_height);
+    async fn save_synced_height(&self, handler_id: &str, sync_height: SyncHeight) -> SyncCoreResult<()> {
+        self.storage.write().insert(handler_id.to_owned(), sync_height);
         Ok(())
     }
 
-    async fn load_synced_height(&self, sync_id: &str) -> SyncCoreResult<Option<SyncHeight>> {
-        Ok(self.storage.read().get(sync_id).copied())
+    async fn load_synced_height(&self, handler_id: &str) -> SyncCoreResult<Option<SyncHeight>> {
+        Ok(self.storage.read().get(handler_id).copied())
     }
 }
 
@@ -48,21 +48,21 @@ mod tests {
     #[tokio::test]
     async fn test_save_synced_height_overwrites_existing_value() -> anyhow::Result<()> {
         let status_store = MemStatusStore::new(0);
-        let sync_id = "sync_1".to_string();
+        let id = "sync_1".to_string();
 
-        status_store.save_synced_height(&sync_id, 1).await?;
-        status_store.save_synced_height(&sync_id, 2).await?;
+        status_store.save_synced_height(&id, 1).await?;
+        status_store.save_synced_height(&id, 2).await?;
 
-        assert_eq!(Some(2), status_store.load_synced_height(&sync_id).await?);
+        assert_eq!(Some(2), status_store.load_synced_height(&id).await?);
         Ok(())
     }
 
     #[tokio::test]
     async fn test_load_synced_height_returns_none_for_unknown_id() -> anyhow::Result<()> {
         let status_store = MemStatusStore::new(0);
-        let sync_id = "missing_sync".to_string();
+        let id = "missing_sync".to_string();
 
-        assert_eq!(None, status_store.load_synced_height(&sync_id).await?);
+        assert_eq!(None, status_store.load_synced_height(&id).await?);
         Ok(())
     }
 }

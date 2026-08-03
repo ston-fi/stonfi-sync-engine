@@ -42,24 +42,18 @@ pub struct TaskServer {
 
 impl TaskServer {
     /// Starts configuring a server backed by `coordinator`.
-    ///
-    /// Set a listen address before calling the builder's asynchronous `build`
-    /// method.
     #[must_use]
     pub fn builder(coordinator: Coordinator) -> Builder {
         Builder::new(coordinator)
     }
 
-    /// Returns the socket address bound by the builder's `build` method.
+    /// Returns the bound socket address.
     #[must_use]
     pub fn local_address(&self) -> SocketAddr {
         self.local_address
     }
 
     /// Starts the server on the current Tokio runtime.
-    ///
-    /// The returned handle owns the spawned server task. Dropping it requests
-    /// best-effort graceful shutdown.
     ///
     /// # Panics
     ///
@@ -94,7 +88,6 @@ impl TaskServer {
 }
 
 /// Owns the task spawned by [`TaskServer::run`].
-#[must_use = "dropping the run handle requests server shutdown without waiting"]
 pub struct TaskServerRunHandle {
     cancellation: CancellationToken,
     task: JoinHandle<SyncCoreResult<()>>,
@@ -106,9 +99,8 @@ impl TaskServerRunHandle {
     ///
     /// # Errors
     ///
-    /// Returns an error when the server fails, the task panics or is cancelled,
-    /// or graceful shutdown exceeds the configured timeout. A timed-out server
-    /// task is aborted before this method returns.
+    /// Returns an error on server or task failure or timeout. A timed-out task
+    /// is aborted.
     pub async fn shutdown(mut self) -> SyncCoreResult<()> {
         self.cancellation.cancel();
         match tokio::time::timeout(self.shutdown_timeout, &mut self.task).await {
@@ -128,8 +120,7 @@ impl TaskServerRunHandle {
     ///
     /// # Errors
     ///
-    /// Returns an error when the server fails or its task panics or is
-    /// cancelled.
+    /// Returns an error on server or task failure.
     pub async fn wait(mut self) -> SyncCoreResult<()> {
         flatten_server_join((&mut self.task).await)
     }

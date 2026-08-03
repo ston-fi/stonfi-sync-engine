@@ -15,11 +15,10 @@ use std::time::{Duration, Instant};
 use stonfi_sync_core::errors::{SyncCoreError, SyncCoreResult};
 use tokio::sync::{Notify, oneshot};
 
-/// Relative dispatch priority for tasks waiting at the coordinator.
+/// Coordinator dispatch priority.
 ///
-/// Within the regular or service queue, higher-priority tasks are dispatched
-/// first and equal-priority tasks are dispatched in FIFO order. Service-capable
-/// workers select the service queue before the regular queue.
+/// Each queue dispatches higher priorities first and preserves FIFO within a
+/// priority. Service-capable workers prefer the service queue.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
 #[non_exhaustive]
 pub enum TaskPriority {
@@ -52,20 +51,16 @@ impl TaskDeadline {
     }
 }
 
-/// In-memory coordinator that queues tasks and joins worker completions back to
-/// the waiting synchronization range.
+/// Process-local task queues and in-flight assignments shared by all clones.
 ///
-/// Clones share the same queues and in-flight assignments. State is
-/// process-local and is not durable across restarts. This type does not own the
-/// task server, Tokio runtime, status persistence, or workers.
+/// The coordinator is not durable and does not own the server or workers.
 #[derive(Clone, Default)]
 pub struct Coordinator {
     inner: Arc<Inner>,
 }
 
 impl Coordinator {
-    /// Creates empty process-local coordination state.
-    ///
+    /// Creates empty coordination state.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
@@ -125,56 +120,54 @@ impl Inner {
         deadline: TaskDeadline,
     ) -> SyncCoreResult<Vec<u8>> {
         let started_at = Instant::now();
-        let handler_id = handler.id().to_owned();
+        let id = handler.id().to_owned();
 
         loop {
             let elapsed = started_at.elapsed();
             let remaining = deadline.instant.saturating_duration_since(tokio::time::Instant::now());
             if remaining.is_zero() {
-                CoordinatorMetrics::complete(&handler_id, CoordinatorTaskStatus::TimedOut, elapsed);
+                CoordinatorMetrics::complete(&id, CoordinatorTaskStatus::TimedOut, elapsed);
                 return Err(SyncCoreError::net(format!(
-                    "distributed task for handler '{handler_id}' reached its deadline"
+                    "distributed task for handler '{id}' reached its deadline"
                 )));
             }
 
             let assignment_id = self.next_assignment_id()?;
             let assignment = TaskAssignment {
                 assignment_id,
-                handler_id: handler_id.clone(),
+                handler_id: id.clone(),
                 payload: payload.clone(),
                 deadline_unix_ms: deadline.unix_ms,
                 service_task: handler.is_service_task(),
             };
             let receiver = self.push(assignment, handler.task_priority(), deadline.instant);
             let guard = AssignmentGuard::new(self.clone(), assignment_id);
-            CoordinatorMetrics::queued(&handler_id);
+            CoordinatorMetrics::queued(&id);
 
             let completion = tokio::time::timeout_at(deadline.instant, receiver).await;
             drop(guard);
 
             match completion {
                 Ok(Ok(Ok(result))) => {
-                    CoordinatorMetrics::complete(&handler_id, CoordinatorTaskStatus::Processed, started_at.elapsed());
+                    CoordinatorMetrics::complete(&id, CoordinatorTaskStatus::Processed, started_at.elapsed());
                     return Ok(result);
                 },
                 Ok(Ok(Err(error))) => {
-                    CoordinatorMetrics::complete(&handler_id, CoordinatorTaskStatus::Failed, started_at.elapsed());
-                    tracing::warn!(
-                        "[DISTRIBUTED_SYNC][{handler_id}] assignment {assignment_id} failed: {error}; retrying"
-                    );
+                    CoordinatorMetrics::complete(&id, CoordinatorTaskStatus::Failed, started_at.elapsed());
+                    tracing::warn!("[DISTRIBUTED_SYNC][{id}] assignment {assignment_id} failed: {error}; retrying");
                     sleep_before_retry(handler.retry_delay(), deadline.instant).await;
                 },
                 Ok(Err(error)) => {
-                    CoordinatorMetrics::complete(&handler_id, CoordinatorTaskStatus::Failed, started_at.elapsed());
+                    CoordinatorMetrics::complete(&id, CoordinatorTaskStatus::Failed, started_at.elapsed());
                     tracing::warn!(
-                        "[DISTRIBUTED_SYNC][{handler_id}] assignment {assignment_id} completion channel closed: {error}; retrying"
+                        "[DISTRIBUTED_SYNC][{id}] assignment {assignment_id} completion channel closed: {error}; retrying"
                     );
                     sleep_before_retry(handler.retry_delay(), deadline.instant).await;
                 },
                 Err(_) => {
-                    CoordinatorMetrics::complete(&handler_id, CoordinatorTaskStatus::TimedOut, started_at.elapsed());
+                    CoordinatorMetrics::complete(&id, CoordinatorTaskStatus::TimedOut, started_at.elapsed());
                     return Err(SyncCoreError::net(format!(
-                        "distributed task for handler '{handler_id}' reached its deadline"
+                        "distributed task for handler '{id}' reached its deadline"
                     )));
                 },
             }
@@ -183,7 +176,7 @@ impl Inner {
 
     fn next_assignment_id(&self) -> SyncCoreResult<u64> {
         self.next_assignment_id
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| current.checked_add(1))
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |current| current.checked_add(1))
             .map(|previous| previous + 1)
             .map_err(|_| SyncCoreError::logic("distributed assignment ID space exhausted"))
     }
@@ -377,12 +370,12 @@ mod tests {
             Ok(EmptyTaskResult)
         }
 
-        fn sync_timeout(&self) -> Duration {
-            self.0
-        }
-
         fn retry_delay(&self) -> Duration {
             Duration::from_millis(20)
+        }
+
+        fn sync_timeout(&self) -> Duration {
+            self.0
         }
     }
 

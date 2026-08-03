@@ -30,8 +30,8 @@ pub(super) struct SyncEngineMetrics {
 
 impl SyncEngineMetrics {
     fn new() -> anyhow::Result<Self> {
-        let common_labels = &["component_id"];
-        let phase_labels = &["component_id", "phase"];
+        let common_labels = &["handler_id"];
+        let phase_labels = &["handler_id", "phase"];
 
         Ok(Self {
             sync_engine_last_loaded_height: register_uint_gauge_vec(
@@ -63,46 +63,40 @@ impl SyncEngineMetrics {
         })
     }
 
-    pub(super) fn update_loaded_height(component_id: &str, latest_height: SyncHeight) {
+    pub(super) fn update_loaded_height(id: &str, latest_height: SyncHeight) {
         METRICS
             .sync_engine_last_loaded_height
-            .with_label_values(&[component_id])
+            .with_label_values(&[id])
             .set(latest_height);
     }
 
-    pub(super) fn update_synced_height(component_id: &str, height: SyncHeight) {
-        METRICS
-            .sync_engine_last_synced_height
-            .with_label_values(&[component_id])
-            .set(height);
+    pub(super) fn update_synced_height(id: &str, height: SyncHeight) {
+        METRICS.sync_engine_last_synced_height.with_label_values(&[id]).set(height);
     }
 
-    pub(super) fn update_sync(component_id: &str, from: SyncHeight, to: SyncHeight, duration: Duration) {
+    pub(super) fn update_sync(id: &str, from: SyncHeight, to: SyncHeight, duration: Duration) {
         if to < from {
-            tracing::warn!("[METRICS][{component_id}] invalid sync range for metrics: from={from}, to={to}");
+            tracing::warn!("[METRICS][{id}] invalid sync range for metrics: from={from}, to={to}");
             return;
         }
         let heights_processed = to - from + 1;
-        Self::update_synced_height(component_id, to);
+        Self::update_synced_height(id, to);
 
         METRICS
             .sync_engine_heights_processed
-            .with_label_values(&[component_id])
+            .with_label_values(&[id])
             .inc_by(heights_processed);
 
         let duration_millis = format_duration_ms(duration);
         let duration_for_height = duration_millis / heights_processed as f64;
         METRICS
             .sync_engine_height_process_duration_ms
-            .with_label_values(&[component_id])
+            .with_label_values(&[id])
             .observe(duration_for_height);
     }
 
-    pub(super) fn inc_retries(component_id: &str, phase: SyncPhase) {
-        METRICS
-            .sync_engine_retries
-            .with_label_values(&[component_id, phase.into()])
-            .inc();
+    pub(super) fn inc_retries(id: &str, phase: SyncPhase) {
+        METRICS.sync_engine_retries.with_label_values(&[id, phase.into()]).inc();
     }
 }
 

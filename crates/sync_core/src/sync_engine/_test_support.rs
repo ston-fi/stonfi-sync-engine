@@ -102,8 +102,8 @@ impl SyncStatusStore for TestStatusStore {
         self.initial_synced_height
     }
 
-    async fn save_synced_height(&self, sync_id: &str, sync_height: SyncHeight) -> SyncCoreResult<()> {
-        if sync_id == INITIAL_SYNC_ID
+    async fn save_synced_height(&self, handler_id: &str, sync_height: SyncHeight) -> SyncCoreResult<()> {
+        if handler_id == INITIAL_HEIGHT
             && self
                 .initial_save_failures
                 .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| remaining.checked_sub(1))
@@ -111,12 +111,12 @@ impl SyncStatusStore for TestStatusStore {
         {
             return Err(SyncCoreError::custom("configured initial save failure"));
         }
-        self.storage.write().entry(sync_id.to_owned()).or_default().push(sync_height);
+        self.storage.write().entry(handler_id.to_owned()).or_default().push(sync_height);
         Ok(())
     }
 
-    async fn load_synced_height(&self, sync_id: &str) -> SyncCoreResult<Option<SyncHeight>> {
-        Ok(self.storage.read().get(sync_id).and_then(|heights| heights.last().copied()))
+    async fn load_synced_height(&self, handler_id: &str) -> SyncCoreResult<Option<SyncHeight>> {
+        Ok(self.storage.read().get(handler_id).and_then(|heights| heights.last().copied()))
     }
 }
 
