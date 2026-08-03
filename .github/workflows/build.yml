@@ -13,7 +13,7 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -62,3 +62,28 @@ jobs:
         with:
           tool: cargo-semver-checks@0.48.0
       - run: bash .github/check-semver.sh
+
+  github-release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [quality, msrv, external-consumer, semver]
+    runs-on: ubuntu-latest
+    concurrency:
+      group: github-release-main
+      cancel-in-progress: false
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@1.95.0
+      - name: Resolve release tag
+        id: release
+        run: |
+          version=$(cargo metadata --locked --no-deps --format-version 1 | jq -er \
+            '.packages[] | select(.name == "stonfi_sync_core") | .version')
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/publish-github-release.sh "${{ steps.release.outputs.tag }}" "$GITHUB_SHA"

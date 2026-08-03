@@ -65,4 +65,7 @@ distribution or versioning policy unless the task explicitly requires it.
 Stable coordinated workspace releases use a `vMAJOR.MINOR.PATCH` tag only when
 both package versions match it. The tag workflow reruns this full gate, checks
 the tag-to-manifest versions, and creates a GitHub Release without publishing
-to crates.io. Package versions otherwise remain independent.
+to crates.io. Successful `main` CI creates a missing coordinated tag and
+GitHub Release directly because tags pushed with `GITHUB_TOKEN` do not trigger
+another workflow. A manually pushed tag remains the recovery path and reruns
+the same gate. Package versions otherwise remain independent.

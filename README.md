@@ -18,12 +18,12 @@ independent dependency and release boundary.
 
 ## Installation
 
-The `v0.1.0` workspace tag contains both packages:
+The `v0.0.1` workspace tag contains both packages:
 
 ```toml
 [dependencies]
-stonfi_distributed_sync = { git = "https://github.com/ston-fi/stonfi-sync-engine", tag = "v0.1.0" }
-stonfi_sync_core = { git = "https://github.com/ston-fi/stonfi-sync-engine", tag = "v0.1.0" }
+stonfi_distributed_sync = { git = "https://github.com/ston-fi/stonfi-sync-engine", tag = "v0.0.1" }
+stonfi_sync_core = { git = "https://github.com/ston-fi/stonfi-sync-engine", tag = "v0.0.1" }
 ```
 
 Package versions remain independent. A workspace tag is used only for a
@@ -53,7 +53,8 @@ bash .github/check-semver.sh
 
 ## Releases
 
-Pull requests and `main` run the reusable CI workflow. Pushing a stable
-`vMAJOR.MINOR.PATCH` tag runs the same complete gate, verifies that the tag
-matches both package manifests, and creates the corresponding GitHub Release.
-The packages are Git-distributed and are not published to crates.io.
+Pull requests and `main` run the reusable CI workflow. After every required
+check passes on `main`, CI creates the missing coordinated
+`vMAJOR.MINOR.PATCH` tag and GitHub Release for the versions in both manifests.
+Manually pushed stable tags run the same complete gate as a recovery path. The
+packages are Git-distributed and are not published to crates.io.
