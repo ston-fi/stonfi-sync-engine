@@ -74,7 +74,6 @@ impl WorkerRunHandle {
                 for task in self.tasks.iter() {
                     task.abort();
                 }
-                let _ = self.join_tasks().await;
                 Err(SyncCoreError::system(format!(
                     "worker shutdown exceeded {shutdown_timeout:.3?}"
                 )))
@@ -180,17 +179,15 @@ async fn task_completion(
     started_at: Instant,
 ) -> Option<CompleteRequest> {
     let id = &assignment.handler_id;
-    let task_deadline = match deadline_from_unix_millis(assignment.deadline_unix_ms, "task deadline") {
-        Ok(task_deadline) => task_deadline,
-        Err(error) => {
-            WorkerMetrics::task(id, WorkerTaskStatus::TimedOut, started_at.elapsed());
-            return Some(completion_request(
-                &inner.worker_id,
-                assignment.assignment_id,
-                Outcome::ErrorMessage(error.to_string()),
-            ));
-        },
-    };
+    let task_deadline = deadline_from_unix_millis(assignment.deadline_unix_ms);
+    if task_deadline <= tokio::time::Instant::now() {
+        WorkerMetrics::task(id, WorkerTaskStatus::TimedOut, started_at.elapsed());
+        return Some(completion_request(
+            &inner.worker_id,
+            assignment.assignment_id,
+            Outcome::ErrorMessage(format!("assignment {} reached its deadline", assignment.assignment_id)),
+        ));
+    }
 
     let _permit = match processing_permit(inner, &assignment, cancellation, task_deadline).await {
         ProcessingPermit::Acquired(permit) => permit,
@@ -314,23 +311,51 @@ async fn process_outcome(
 
 #[cfg(test)]
 mod tests {
-    use super::{Inner, ProcessingPermit, Worker, process_outcome, processing_permit, task_completion};
+    use super::{
+        Inner, ProcessingPermit, Worker, WorkerRunHandle, process_outcome, processing_permit, task_completion,
+    };
     use crate::coordinator::Coordinator;
     use crate::distributed_adapter::{DistributedAdapter, ErasedHandler};
     use crate::proto::TaskAssignment;
     use crate::proto::complete_request::Outcome;
     use crate::task::{EmptyTaskResult, RangeTask};
     use crate::task_server::{PollObserver, TaskServer};
-    use crate::traits::{DistributedHandler, TaskBatch};
+    use crate::traits::{DistributedHandler, TaskBatch, TaskPayload};
+    use futures::stream::FuturesUnordered;
     use std::collections::HashMap;
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, mpsc};
     use std::time::Duration;
     use stonfi_sync_core::errors::SyncCoreResult;
     use stonfi_sync_core::sync_engine::{SyncHandler, SyncHeight};
     use tokio::sync::Semaphore;
     use tokio_util::sync::CancellationToken;
     use tonic::transport::Endpoint;
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_shutdown_does_not_wait_for_aborted_tasks() -> anyhow::Result<()> {
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let task = tokio::spawn(async move {
+            let _ = started_tx.send(());
+            let _ = release_rx.recv();
+        });
+        started_rx.recv_timeout(Duration::from_secs(1))?;
+
+        let tasks = FuturesUnordered::new();
+        tasks.push(task);
+        let handle = WorkerRunHandle {
+            cancellation: CancellationToken::new(),
+            tasks,
+            shutdown_timeout: Duration::from_millis(10),
+        };
+        let result = tokio::time::timeout(Duration::from_secs(1), handle.shutdown()).await;
+        release_tx.send(())?;
+
+        let shutdown = result.map_err(|_| anyhow::anyhow!("worker shutdown remained blocked after abort"))?;
+        assert!(shutdown.is_err());
+        Ok(())
+    }
 
     struct TestHandler {
         id: &'static str,
@@ -407,17 +432,22 @@ mod tests {
         let endpoint = format!("http://{}", server.local_address());
         let server_handle = server.run();
 
-        let handler = Arc::new(TestHandler {
-            id: "deterministic-service-capacity",
-            service_task: true,
-        });
-        let mut synchronizer = DistributedAdapter::new(handler.clone(), coordinator)?;
+        let mut synchronizer = DistributedAdapter::new(
+            TestHandler {
+                id: "deterministic-service-capacity",
+                service_task: true,
+            },
+            coordinator,
+        );
         let worker_handle = Worker::builder(endpoint)
             .with_service_tasks_enabled(true)
             .with_polling_timeout(Duration::from_secs(2))
             .with_reconnect_delay(Duration::from_millis(10))
             .with_shutdown_timeout(Duration::from_secs(1))
-            .add_handler(handler)?
+            .add_handler(TestHandler {
+                id: "deterministic-service-capacity",
+                service_task: true,
+            })?
             .build()?
             .run();
 
@@ -450,7 +480,7 @@ mod tests {
             assignment_id: 1,
             handler_id: "unregistered".to_owned(),
             payload: Vec::new(),
-            deadline_unix_ms: crate::utils::deadline_unix_millis(Duration::from_millis(100), "test deadline")?,
+            deadline_unix_ms: crate::utils::deadline_unix_millis(Duration::from_millis(100)),
             service_task: false,
         };
 
@@ -489,7 +519,7 @@ mod tests {
             assignment_id: 1,
             handler_id: "test".to_owned(),
             payload: Vec::new(),
-            deadline_unix_ms: crate::utils::deadline_unix_millis(Duration::from_millis(10), "test deadline")?,
+            deadline_unix_ms: crate::utils::deadline_unix_millis(Duration::from_millis(10)),
             service_task: false,
         };
 
@@ -531,7 +561,7 @@ mod tests {
             TaskAssignment {
                 assignment_id: 1,
                 handler_id: id,
-                payload: Vec::new(),
+                payload: RangeTask { from: 1, to: 1 }.encode()?,
                 deadline_unix_ms: 1,
                 service_task: false,
             },

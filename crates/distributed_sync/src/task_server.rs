@@ -107,7 +107,6 @@ impl TaskServerRunHandle {
             Ok(result) => flatten_server_join(result),
             Err(_) => {
                 self.task.abort();
-                let _ = (&mut self.task).await;
                 Err(SyncCoreError::system(format!(
                     "task server shutdown exceeded {:.3?}",
                     self.shutdown_timeout
@@ -196,5 +195,38 @@ impl TaskServerMetrics {
             .request_duration_ms
             .with_label_values(&[method, status])
             .observe(format_duration_ms(duration));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TaskServerRunHandle;
+    use std::sync::mpsc;
+    use std::time::Duration;
+    use stonfi_sync_core::errors::SyncCoreResult;
+    use tokio_util::sync::CancellationToken;
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_shutdown_does_not_wait_for_aborted_task() -> anyhow::Result<()> {
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let task = tokio::spawn(async move {
+            let _ = started_tx.send(());
+            let _ = release_rx.recv();
+            SyncCoreResult::Ok(())
+        });
+        started_rx.recv_timeout(Duration::from_secs(1))?;
+
+        let handle = TaskServerRunHandle {
+            cancellation: CancellationToken::new(),
+            task,
+            shutdown_timeout: Duration::from_millis(10),
+        };
+        let result = tokio::time::timeout(Duration::from_secs(1), handle.shutdown()).await;
+        release_tx.send(())?;
+
+        let shutdown = result.map_err(|_| anyhow::anyhow!("server shutdown remained blocked after abort"))?;
+        assert!(shutdown.is_err());
+        Ok(())
     }
 }

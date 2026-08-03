@@ -40,9 +40,10 @@ stonfi_metrics = { version = "0.0.1", git = "https://github.com/ston-fi/stonfi-m
 
 The crate requires a Tokio runtime. Implement [`HeightLoader`] for each source,
 [`SyncHandler`] for each range handler, and [`SyncStatusStore`] for durable
-progress. Wrap implementations with [`HeightProvider`] and [`Synchronizer`],
-connect their progress providers through [`SyncEngine::builder`], and call
-[`SyncEngine::run`].
+progress. Register implementations directly when they are leaves in the
+dependency graph. Wrap them with [`HeightProvider`] or [`Synchronizer`] first
+when their progress must be passed to a dependent handler, connect the graph
+through [`SyncEngine::builder`], and call [`SyncEngine::run`].
 
 See [`examples/simple.rs`](examples/simple.rs) for a complete runnable example.
 
@@ -127,6 +128,9 @@ provide compare-and-set coordination.
   with the same previous height.
 - Returning `Ok(None)` from [`SyncHandler::sync_range`] defers that range until
   an upstream progress provider advances again.
+- [`SyncHandler::sync_timeout`] and the configured lifecycle shutdown timeout
+  are passed directly to Tokio. A zero duration therefore uses Tokio's normal
+  ready-first timeout behavior.
 - `allow_rewind()` permits a handler to publish a lower height. Upstream
   decreases do not rewind dependants or cancel an active wait; later waits use
   current progress-provider values.
@@ -140,6 +144,11 @@ and extension traits are under [`sync_engine`]. The main types are [`SyncEngine`
 [`MemStatusStore`]. Consumer-owned extension points are [`HeightLoader`],
 [`SyncHandler`], [`SyncStatusStore`], [`ProgressProvider`], and [`SyncCallback`].
 Each progress subscription returns a [`ProgressReceiver`].
+`Builder::add_height_provider` accepts any [`HeightLoader`], and
+`Builder::add_synchronizer` accepts any [`SyncHandler`], through their standard
+conversions into the corresponding engine-owned wrapper. Construct a wrapper
+explicitly only when its [`ProgressProvider`] must be referenced by another
+registration.
 Pass dependencies by reference to `Builder::add_synchronizer`; the builder
 subscribes to each [`ProgressProvider`] before its owner is registered.
 Every referenced engine-owned provider must subsequently be registered with
@@ -217,6 +226,7 @@ cargo package --list --locked -p stonfi_sync_core
 [`SyncEngine::run`]: crate::sync_engine::SyncEngine::run
 [`SyncHandler`]: crate::sync_engine::SyncHandler
 [`SyncHandler::sync_range`]: crate::sync_engine::SyncHandler::sync_range
+[`SyncHandler::sync_timeout`]: crate::sync_engine::SyncHandler::sync_timeout
 [`INITIAL_HEIGHT`]: crate::sync_engine::INITIAL_HEIGHT
 [`HeightLoader`]: crate::sync_engine::HeightLoader
 [`SyncStatusStore`]: crate::sync_engine::SyncStatusStore

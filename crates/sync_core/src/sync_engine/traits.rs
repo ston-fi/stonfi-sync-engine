@@ -32,8 +32,9 @@ pub trait SyncHandler: Send + 'static {
     /// persistence or publication. `Ok(Some(height))` commits a height in the
     /// range, or a lower height when [`Self::allow_rewind`] is enabled.
     ///
-    /// Calls are at-least-once and cancelled at [`Self::sync_timeout`]; effects
-    /// must therefore be idempotent, cancellation-safe, or transactional.
+    /// Calls are at-least-once and passed to [`tokio::time::timeout`] with
+    /// [`Self::sync_timeout`]; effects must therefore be idempotent,
+    /// cancellation-safe, or transactional.
     async fn sync_range(&mut self, from: SyncHeight, to: SyncHeight) -> SyncCoreResult<Option<SyncHeight>>;
 
     /// Returns whether new ranges may be processed.
@@ -44,7 +45,7 @@ pub trait SyncHandler: Send + 'static {
     fn min_batch_size(&self) -> usize { 1 }
     /// Returns the maximum batch size.
     fn max_batch_size(&self) -> usize { 1 }
-    /// Returns the timeout for [`Self::sync_range`].
+    /// Returns the duration passed to [`tokio::time::timeout`] for [`Self::sync_range`].
     fn sync_timeout(&self) -> Duration { Duration::from_secs(10) }
     /// Allows [`Self::sync_range`] to rewind below `from`.
     fn allow_rewind(&self) -> bool { false }

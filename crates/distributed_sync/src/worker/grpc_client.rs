@@ -17,7 +17,7 @@ impl GrpcClient {
         polling_timeout: Duration,
         service_tasks_enabled: bool,
     ) -> SyncCoreResult<Self> {
-        let polling_timeout_ms = timeout_millis(polling_timeout, "worker polling timeout")?;
+        let polling_timeout_ms = timeout_millis(polling_timeout);
         let channel = endpoint.connect().await.map_err(SyncCoreError::net)?;
         Ok(Self {
             client: TaskServiceClient::new(channel),

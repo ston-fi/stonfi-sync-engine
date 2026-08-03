@@ -1,7 +1,6 @@
 use super::{Inner, Worker};
 use crate::distributed_adapter::ErasedHandler;
 use crate::traits::DistributedHandler;
-use crate::utils::{validate_timeout, validate_timeout_millis};
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::num::NonZeroUsize;
@@ -83,14 +82,14 @@ impl Builder {
     /// # Errors
     ///
     /// Returns an error when the handler ID is already registered.
-    pub fn add_handler<H>(mut self, handler: Arc<H>) -> SyncCoreResult<Self>
+    pub fn add_handler<H>(mut self, handler: H) -> SyncCoreResult<Self>
     where
         H: DistributedHandler,
     {
         let id = handler.id().to_owned();
         match self.handlers.entry(id.clone()) {
             Entry::Vacant(entry) => {
-                entry.insert(handler);
+                entry.insert(Arc::new(handler));
                 Ok(self)
             },
             Entry::Occupied(_) => Err(SyncCoreError::logic(format!("worker handler '{id}' is already registered"))),
@@ -101,8 +100,8 @@ impl Builder {
     ///
     /// # Errors
     ///
-    /// Returns an error for invalid transport or lifecycle configuration, an
-    /// unavailable CPU parallelism value, identifier exhaustion, or no handlers.
+    /// Returns an error for invalid transport configuration, an unavailable CPU
+    /// parallelism value, identifier exhaustion, or no handlers.
     pub fn build(self) -> SyncCoreResult<Worker> {
         if self.handlers.is_empty() {
             return Err(SyncCoreError::invalid_args("worker requires at least one handler"));
@@ -113,9 +112,6 @@ impl Builder {
                 "worker endpoint must use the trusted-network http scheme",
             ));
         }
-        validate_timeout_millis(self.polling_timeout, "worker polling timeout")?;
-        validate_timeout(self.reconnect_delay, "worker reconnect delay")?;
-        validate_timeout(self.shutdown_timeout, "worker shutdown timeout")?;
         let parallelism = match self.parallelism {
             Some(parallelism) => parallelism,
             None => std::thread::available_parallelism().map_err(SyncCoreError::system)?,
@@ -129,7 +125,7 @@ impl Builder {
         let parallelism_u32 = u32::try_from(parallelism.get())
             .map_err(|_| SyncCoreError::invalid_args("worker parallelism exceeds u32"))?;
         let worker_counter = WORKER_COUNTER
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| current.checked_add(1))
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |current| current.checked_add(1))
             .map(|previous| previous + 1)
             .map_err(|_| SyncCoreError::logic("worker ID counter exhausted"))?;
 

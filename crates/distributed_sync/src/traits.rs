@@ -1,9 +1,8 @@
 use crate::coordinator::{Coordinator, TaskPriority};
 use crate::distributed_adapter::DistributedAdapter;
-use std::sync::Arc;
 use std::time::Duration;
 use stonfi_sync_core::errors::SyncCoreResult;
-use stonfi_sync_core::sync_engine::{SyncHeight, Synchronizer};
+use stonfi_sync_core::sync_engine::{SyncHandler, SyncHeight, Synchronizer};
 
 /// Deterministic task and result serialization for gRPC transport.
 ///
@@ -48,9 +47,9 @@ impl<T> TaskBatch<T> {
 
 /// Defines coordinator-side task creation and worker-side task processing.
 ///
-/// Call [`DistributedHandler::into_sync`] on a shared handler for core-engine
-/// registration, then register the same handler with workers. Task processing
-/// is concurrent and at-least-once, so effects must be idempotent.
+/// Construct independent handler instances for coordinator and worker
+/// processes. Task processing is concurrent and at-least-once, so effects must
+/// be idempotent.
 #[async_trait::async_trait]
 pub trait DistributedHandler: Send + Sync + 'static {
     /// Task payload sent to workers.
@@ -61,20 +60,19 @@ pub trait DistributedHandler: Send + Sync + 'static {
     /// Returns the stable handler ID used for routing, logging, metrics, and status.
     fn id(&self) -> &str;
 
-    /// Wraps this shared handler for registration with `stonfi_sync_core`.
+    /// Consumes this coordinator-side handler into an adapter for registration
+    /// with `stonfi_sync_core`.
     ///
-    /// The same `Arc` can also be registered through
-    /// [`Worker::builder`](crate::worker::Worker::builder).
+    /// The adapter can be passed directly to `SyncEngine`'s builder. Convert it
+    /// into a [`Synchronizer`] first when another handler depends on its
+    /// progress.
     ///
-    /// # Errors
-    ///
-    /// Returns an error when the synchronization timeout cannot be represented
-    /// by the distributed protocol.
-    fn into_sync(self: Arc<Self>, coordinator: Coordinator) -> SyncCoreResult<Synchronizer>
+    #[must_use = "register the returned adapter with SyncEngine"]
+    fn into_sync(self, coordinator: Coordinator) -> impl SyncHandler + Into<Synchronizer>
     where
         Self: Sized,
     {
-        Ok(DistributedAdapter::new(self, coordinator)?.into())
+        DistributedAdapter::new(self, coordinator)
     }
 
     /// Creates tasks for the inclusive engine range `[from, to]`.
@@ -137,7 +135,8 @@ pub trait DistributedHandler: Send + Sync + 'static {
     }
 
     /// Returns the end-to-end timeout for task creation, dispatch, processing,
-    /// and result handling.
+    /// and result handling. The core passes it to Tokio, while distributed task
+    /// attempts share an absolute deadline with millisecond wire precision.
     fn sync_timeout(&self) -> Duration {
         Duration::from_secs(10)
     }

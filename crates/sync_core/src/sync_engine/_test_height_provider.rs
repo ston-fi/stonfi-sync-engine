@@ -33,7 +33,7 @@ async fn test_initial_loaded_height_is_published() -> anyhow::Result<()> {
     }
     .into();
     let id = "sync_initial_publish".to_string();
-    let sync = TestSync::new(&id, 0).into();
+    let sync = TestSync::new(&id, 0);
     let engine = SyncEngine::builder(status_store.clone())
         .add_synchronizer(sync, &[&height_provider])?
         .add_height_provider(height_provider)?
@@ -126,14 +126,11 @@ async fn initial_events(height: SyncHeight) -> anyhow::Result<Vec<InitialEvent>>
         done: Notify::new(),
     });
     let engine = SyncEngine::builder(Arc::new(TestStatusStore::new(0)))
-        .add_height_provider(
-            InitialHeightLoader {
-                height,
-                calls: 0,
-                release: release.clone(),
-            }
-            .into(),
-        )?
+        .add_height_provider(InitialHeightLoader {
+            height,
+            calls: 0,
+            release: release.clone(),
+        })?
         .add_callback(callback.clone())
         .build();
 

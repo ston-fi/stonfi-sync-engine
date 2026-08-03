@@ -29,18 +29,12 @@ impl TaskServiceImpl {
         if request.worker_id.trim().is_empty() {
             return Err(Status::invalid_argument("worker_id must not be empty"));
         }
-        if request.polling_timeout_ms == 0 {
-            return Err(Status::invalid_argument("polling_timeout_ms must be positive"));
-        }
         #[cfg(test)]
         if let Some(observer) = &self.poll_observer {
             observer.poll_started();
         }
-        let task = self
-            .coordinator
-            .poll(Duration::from_millis(request.polling_timeout_ms), request.service_tasks_enabled)
-            .await
-            .map_err(sync_error_to_status)?;
+        let polling_timeout = Duration::from_millis(request.polling_timeout_ms);
+        let task = self.coordinator.poll(polling_timeout, request.service_tasks_enabled).await;
         Ok(PollResponse { task })
     }
 
@@ -75,5 +69,33 @@ fn sync_error_to_status(error: SyncCoreError) -> Status {
         SyncCoreError::InvalidArgs(message) => Status::invalid_argument(message),
         SyncCoreError::NetError(message) => Status::unavailable(message),
         other => Status::internal(other.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TaskServiceImpl;
+    use crate::coordinator::Coordinator;
+    use crate::proto::PollRequest;
+    use crate::utils::timeout_millis;
+    use std::time::Duration;
+
+    #[tokio::test]
+    async fn test_zero_polling_timeout_round_trips_as_zero() -> anyhow::Result<()> {
+        stonfi_metrics::init_metrics!()?;
+        assert_eq!(timeout_millis(Duration::ZERO), 0);
+
+        let response = tokio::time::timeout(
+            Duration::from_secs(1),
+            TaskServiceImpl::new(Coordinator::new()).poll_inner(PollRequest {
+                worker_id: "worker".to_owned(),
+                polling_timeout_ms: 0,
+                service_tasks_enabled: false,
+            }),
+        )
+        .await??;
+
+        assert!(response.task.is_none());
+        Ok(())
     }
 }

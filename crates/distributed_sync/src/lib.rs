@@ -1,5 +1,7 @@
 #![doc = include_str!("../README.md")]
 
+pub use stonfi_sync_core;
+
 /// In-memory coordinator state and task priority definitions.
 pub mod coordinator;
 mod distributed_adapter;

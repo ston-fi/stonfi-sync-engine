@@ -42,8 +42,13 @@ stores and callbacks are shared across tasks and require `Send + Sync + 'static`
 
 Prefer `SyncEngine::builder`, add synchronizers with references to their
 upstream progress providers, add the corresponding height providers, then
-build and run. The builder subscribes to progress before retaining single
-ownership of height providers and synchronizers. It cannot verify that a
+build and run. Registration accepts raw `SyncHandler` and `HeightLoader`
+implementations through their standard wrapper conversions. Construct
+`Synchronizer` or `HeightProvider` explicitly when its progress must be
+referenced by a dependant. Pass raw implementations or explicitly typed
+wrappers to registration; an inline `.into()` can be ambiguous at these generic
+method boundaries. The builder subscribes to progress before retaining
+single ownership of height providers and synchronizers. It cannot verify that a
 referenced provider is later registered: dropping an unregistered provider
 closes its channel and stops the dependant. `SyncEngine::run` consumes the
 engine definition and returns the runtime owner. Use `RunHandle::shutdown` for
@@ -104,6 +109,8 @@ engine or status-store height domain.
   through `allow_rewind()`; subsequent waits use current provider values.
 - Retry loops are cooperative. Consumer futures must return or enforce their
   own timeout if bounded shutdown latency is required.
+- Pass `SyncHandler::sync_timeout()` and lifecycle shutdown durations directly
+  to Tokio without zero-specific normalization or validation.
 - Do not add parallel builders, aliases, convenience re-exports, or alternate
   lifecycle APIs without a demonstrated downstream need.
 - Production paths must not use `unwrap()`, `expect()`, or panic-driven control
