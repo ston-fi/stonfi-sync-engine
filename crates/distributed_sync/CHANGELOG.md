@@ -5,6 +5,11 @@ here.
 
 ## Unreleased
 
+- Change `DistributedHandler::into_sync` and
+  `Worker::builder(...).add_handler` to consume owned handlers instead of
+  `Arc<Handler>`. Applications should construct independent handler instances
+  for coordinator and worker processes.
+
 ## [0.0.1](https://github.com/ston-fi/stonfi-sync-engine/releases/tag/v0.0.1) - 2026-08-03
 
 - Add the initial public distributed synchronization package with an in-memory

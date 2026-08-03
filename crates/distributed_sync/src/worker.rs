@@ -407,17 +407,22 @@ mod tests {
         let endpoint = format!("http://{}", server.local_address());
         let server_handle = server.run();
 
-        let handler = Arc::new(TestHandler {
-            id: "deterministic-service-capacity",
-            service_task: true,
-        });
-        let mut synchronizer = DistributedAdapter::new(handler.clone(), coordinator)?;
+        let mut synchronizer = DistributedAdapter::new(
+            TestHandler {
+                id: "deterministic-service-capacity",
+                service_task: true,
+            },
+            coordinator,
+        )?;
         let worker_handle = Worker::builder(endpoint)
             .with_service_tasks_enabled(true)
             .with_polling_timeout(Duration::from_secs(2))
             .with_reconnect_delay(Duration::from_millis(10))
             .with_shutdown_timeout(Duration::from_secs(1))
-            .add_handler(handler)?
+            .add_handler(TestHandler {
+                id: "deterministic-service-capacity",
+                service_task: true,
+            })?
             .build()?
             .run();
 

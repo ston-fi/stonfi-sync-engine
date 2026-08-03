@@ -29,12 +29,12 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 ## Runtime model
 
 Implement [`DistributedHandler`](crate::traits::DistributedHandler),
-use the same `Arc` for the core engine and workers, and retain every lifecycle
-handle:
+construct independent instances for the coordinator and each worker process,
+and retain every lifecycle handle. This co-located example uses separate
+instances just as separate deployments do:
 
 ```no_run
 use std::net::SocketAddr;
-use std::sync::Arc;
 use stonfi_distributed_sync::traits::DistributedHandler;
 use stonfi_distributed_sync::coordinator::Coordinator;
 use stonfi_distributed_sync::task_server::{TaskServer, TaskServerRunHandle};
@@ -42,7 +42,8 @@ use stonfi_distributed_sync::worker::{Worker, WorkerRunHandle};
 use stonfi_sync_core::sync_engine::Synchronizer;
 
 async fn build_runtime<H>(
-    handler: Arc<H>,
+    coordinator_handler: H,
+    worker_handler: H,
     listen_address: SocketAddr,
 ) -> anyhow::Result<(Synchronizer, WorkerRunHandle, TaskServerRunHandle)>
 where
@@ -50,7 +51,7 @@ where
 {
     stonfi_metrics::init_metrics!()?;
     let coordinator = Coordinator::new();
-    let synchronizer = handler.clone().into_sync(coordinator.clone())?;
+    let synchronizer = coordinator_handler.into_sync(coordinator.clone())?;
 
     let server = TaskServer::builder(coordinator)
         .with_listen_address(listen_address)
@@ -58,7 +59,7 @@ where
         .await?;
     let endpoint = format!("http://{}", server.local_address());
     let worker = Worker::builder(endpoint)
-        .add_handler(handler)?
+        .add_handler(worker_handler)?
         .build()?;
 
     Ok((synchronizer, worker.run(), server.run()))
@@ -68,8 +69,9 @@ where
 Workers use [`std::thread::available_parallelism`] by default. Call
 `with_parallelism` only when the application needs an explicit limit.
 
-Call `into_sync` on the shared handler and register the returned `Synchronizer`
-with `stonfi_sync_core::SyncEngine`. On
+Call `into_sync` on the coordinator-side handler and register the returned
+`Synchronizer` with `stonfi_sync_core::SyncEngine`. Register separately
+constructed handlers with workers; handler state is local to each process. On
 shutdown, stop the core engine before the worker and server. See
 [`examples/distributed.rs`](examples/distributed.rs) for the complete workflow.
 Initial-height configuration belongs to the core `SyncStatusStore`; distributed

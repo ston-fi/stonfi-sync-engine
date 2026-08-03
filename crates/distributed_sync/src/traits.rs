@@ -1,6 +1,5 @@
 use crate::coordinator::{Coordinator, TaskPriority};
 use crate::distributed_adapter::DistributedAdapter;
-use std::sync::Arc;
 use std::time::Duration;
 use stonfi_sync_core::errors::SyncCoreResult;
 use stonfi_sync_core::sync_engine::{SyncHeight, Synchronizer};
@@ -48,9 +47,9 @@ impl<T> TaskBatch<T> {
 
 /// Defines coordinator-side task creation and worker-side task processing.
 ///
-/// Call [`DistributedHandler::into_sync`] on a shared handler for core-engine
-/// registration, then register the same handler with workers. Task processing
-/// is concurrent and at-least-once, so effects must be idempotent.
+/// Construct independent handler instances for coordinator and worker
+/// processes. Task processing is concurrent and at-least-once, so effects must
+/// be idempotent.
 #[async_trait::async_trait]
 pub trait DistributedHandler: Send + Sync + 'static {
     /// Task payload sent to workers.
@@ -61,16 +60,14 @@ pub trait DistributedHandler: Send + Sync + 'static {
     /// Returns the stable handler ID used for routing, logging, metrics, and status.
     fn id(&self) -> &str;
 
-    /// Wraps this shared handler for registration with `stonfi_sync_core`.
-    ///
-    /// The same `Arc` can also be registered through
-    /// [`Worker::builder`](crate::worker::Worker::builder).
+    /// Consumes this coordinator-side handler for registration with
+    /// `stonfi_sync_core`.
     ///
     /// # Errors
     ///
     /// Returns an error when the synchronization timeout cannot be represented
     /// by the distributed protocol.
-    fn into_sync(self: Arc<Self>, coordinator: Coordinator) -> SyncCoreResult<Synchronizer>
+    fn into_sync(self, coordinator: Coordinator) -> SyncCoreResult<Synchronizer>
     where
         Self: Sized,
     {

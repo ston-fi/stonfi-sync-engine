@@ -17,12 +17,15 @@ pub(crate) struct DistributedAdapter {
 }
 
 impl DistributedAdapter {
-    pub(crate) fn new<H>(handler: Arc<H>, coordinator: Coordinator) -> SyncCoreResult<Self>
+    pub(crate) fn new<H>(handler: H, coordinator: Coordinator) -> SyncCoreResult<Self>
     where
         H: DistributedHandler,
     {
         validate_timeout_millis(handler.sync_timeout(), "distributed handler synchronization timeout")?;
-        Ok(Self { handler, coordinator })
+        Ok(Self {
+            handler: Arc::new(handler),
+            coordinator,
+        })
     }
 }
 
@@ -193,9 +196,8 @@ mod tests {
 
     struct LargeBatchHandler;
 
-    #[derive(Default)]
     struct OrderingHandler {
-        results: Mutex<Vec<SyncHeight>>,
+        results: Arc<Mutex<Vec<SyncHeight>>>,
     }
 
     #[async_trait::async_trait]
@@ -265,7 +267,7 @@ mod tests {
     async fn test_large_batch_limits_coordinator_ongoing_tasks() -> anyhow::Result<()> {
         stonfi_metrics::init_metrics!()?;
         let coordinator = Coordinator::new();
-        let mut adapter = DistributedAdapter::new(Arc::new(LargeBatchHandler), coordinator.clone())?;
+        let mut adapter = DistributedAdapter::new(LargeBatchHandler, coordinator.clone())?;
         let sync_task = tokio::spawn(async move { adapter.sync_range(1, 1).await });
 
         let mut assignments = VecDeque::with_capacity(MAX_ONGOING_TASKS);
@@ -301,8 +303,11 @@ mod tests {
     async fn test_results_preserve_creation_order() -> anyhow::Result<()> {
         stonfi_metrics::init_metrics!()?;
         let coordinator = Coordinator::new();
-        let handler = Arc::new(OrderingHandler::default());
-        let mut adapter = DistributedAdapter::new(handler.clone(), coordinator.clone())?;
+        let results = Arc::new(Mutex::new(Vec::new()));
+        let handler = OrderingHandler {
+            results: results.clone(),
+        };
+        let mut adapter = DistributedAdapter::new(handler, coordinator.clone())?;
         let sync_task = tokio::spawn(async move { adapter.sync_range(1, 3).await });
 
         let mut assignments = Vec::new();
@@ -319,7 +324,7 @@ mod tests {
         }
 
         assert_eq!(sync_task.await??, Some(3));
-        assert_eq!(&*handler.results.lock(), &[1, 2, 3]);
+        assert_eq!(&*results.lock(), &[1, 2, 3]);
         Ok(())
     }
 

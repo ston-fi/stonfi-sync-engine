@@ -83,14 +83,14 @@ impl Builder {
     /// # Errors
     ///
     /// Returns an error when the handler ID is already registered.
-    pub fn add_handler<H>(mut self, handler: Arc<H>) -> SyncCoreResult<Self>
+    pub fn add_handler<H>(mut self, handler: H) -> SyncCoreResult<Self>
     where
         H: DistributedHandler,
     {
         let id = handler.id().to_owned();
         match self.handlers.entry(id.clone()) {
             Entry::Vacant(entry) => {
-                entry.insert(handler);
+                entry.insert(Arc::new(handler));
                 Ok(self)
             },
             Entry::Occupied(_) => Err(SyncCoreError::logic(format!("worker handler '{id}' is already registered"))),

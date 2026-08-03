@@ -29,10 +29,12 @@ extension point is `traits::DistributedHandler`, with associated
 processor trait, codec abstraction, or convenience conversion without a
 demonstrated consumer requirement.
 
-Create one `Arc<Handler>`, call
-`handler.clone().into_sync(coordinator)` for the core engine, and register
-the same handler with `Worker::builder(endpoint).add_handler(handler)`. A
-handler ID must be stable and identical in every coordinator and worker binary.
+Create independent handler instances for coordinator and worker processes.
+Consume the coordinator-side instance with `handler.into_sync(coordinator)` and
+register each worker-side instance with
+`Worker::builder(endpoint).add_handler(handler)`. Handler state is process-local;
+only the handler type and stable ID are shared across binaries. A handler ID
+must be stable and identical in every coordinator and worker binary.
 `SyncEngine`'s builder owns ID validation when the synchronizer is registered;
 distributed constructors do not duplicate it. Initial-height configuration
 belongs to the core `SyncStatusStore`, not to distributed handlers.
@@ -58,11 +60,12 @@ overridden explicitly. Validate invariants before spawning background tasks.
 Downstream applications depend on both Git-distributed packages from the same
 workspace revision, as documented in `README.md`.
 
-Initialize `stonfi_metrics`, create the shared coordinator and handler, start
-the server and workers, and register the handler's `Synchronizer` with the core
-engine. Retain every run handle and shut down the core engine before
-workers and the server. The README doctest and `examples/distributed.rs` are the
-canonical integration references.
+Initialize `stonfi_metrics`, create the shared coordinator plus independent
+coordinator-side and worker-side handlers, start the server and workers, and
+register the coordinator-side handler's `Synchronizer` with the core engine.
+Retain every run handle and shut down the core engine before workers and the
+server. The README doctest and `examples/distributed.rs` are the canonical
+integration references.
 
 ## Delivery, ordering, and lifecycle invariants
 

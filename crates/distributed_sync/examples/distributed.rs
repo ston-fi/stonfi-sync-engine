@@ -52,8 +52,6 @@ async fn main() -> anyhow::Result<()> {
     stonfi_metrics::init_metrics!()?;
 
     let coordinator = Coordinator::new();
-    let handler = Arc::new(RangeHandler);
-
     let server = TaskServer::builder(coordinator.clone())
         .with_listen_address("127.0.0.1:0".parse()?)
         .build()
@@ -63,14 +61,14 @@ async fn main() -> anyhow::Result<()> {
 
     let worker = Worker::builder(endpoint)
         .with_polling_timeout(Duration::from_millis(100))
-        .add_handler(handler.clone())?
+        .add_handler(RangeHandler)?
         .build()?;
     let worker_handle = worker.run();
 
     let height_provider = HeightProvider::new(OneHeightLoader);
     let status_store = Arc::new(MemStatusStore::new(0));
     let engine = SyncEngine::builder(status_store.clone())
-        .add_synchronizer(handler.into_sync(coordinator)?, &[&height_provider])?
+        .add_synchronizer(RangeHandler.into_sync(coordinator)?, &[&height_provider])?
         .add_height_provider(height_provider)?
         .build();
     let engine_handle = engine.run();
