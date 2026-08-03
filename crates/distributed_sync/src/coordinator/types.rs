@@ -1,6 +1,5 @@
 use crate::utils::{deadline_from_unix_millis, deadline_unix_millis};
 use std::time::Duration;
-use stonfi_sync_core::errors::SyncCoreResult;
 
 /// Coordinator dispatch priority.
 ///
@@ -29,11 +28,11 @@ pub(crate) struct TaskDeadline {
 }
 
 impl TaskDeadline {
-    pub(crate) fn new(timeout: Duration) -> SyncCoreResult<Self> {
-        let unix_ms = deadline_unix_millis(timeout, "distributed batch timeout")?;
-        Ok(Self {
-            instant: deadline_from_unix_millis(unix_ms, "distributed batch deadline")?,
+    pub(crate) fn new(timeout: Duration) -> Self {
+        let unix_ms = deadline_unix_millis(timeout);
+        Self {
+            instant: deadline_from_unix_millis(unix_ms),
             unix_ms,
-        })
+        }
     }
 }

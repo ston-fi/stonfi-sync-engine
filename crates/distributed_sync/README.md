@@ -51,7 +51,7 @@ where
 {
     stonfi_metrics::init_metrics!()?;
     let coordinator = Coordinator::new();
-    let synchronizer = coordinator_handler.into_sync(coordinator.clone())?;
+    let synchronizer = coordinator_handler.into_sync(coordinator.clone());
 
     let server = TaskServer::builder(coordinator)
         .with_listen_address(listen_address)
@@ -77,6 +77,13 @@ process. On shutdown, stop the core engine before the worker and server. See
 [`examples/distributed.rs`](examples/distributed.rs) for the complete workflow.
 Initial-height configuration belongs to the core `SyncStatusStore`; distributed
 handlers define task behavior only.
+
+`DistributedHandler::sync_timeout()` covers task creation, dispatch, worker
+capacity, processing, and result handling through the core Tokio timeout.
+Non-empty distributed task attempts also share a strict absolute deadline.
+Polling and lifecycle durations use standard Tokio timeout semantics. Polling
+durations are truncated to whole milliseconds on the wire; values larger than
+`u64` milliseconds saturate to `u64::MAX`.
 
 ## Delivery and ordering
 

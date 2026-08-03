@@ -9,6 +9,7 @@ service TaskService {
 
 message PollRequest {
   string worker_id = 1;
+  // Timeout duration in whole milliseconds.
   uint64 polling_timeout_ms = 2;
   bool service_tasks_enabled = 3;
 }
@@ -21,6 +22,7 @@ message TaskAssignment {
   uint64 assignment_id = 1;
   string handler_id = 2;
   bytes payload = 3;
+  // Absolute Unix deadline in milliseconds.
   uint64 deadline_unix_ms = 4;
   bool service_task = 5;
 }

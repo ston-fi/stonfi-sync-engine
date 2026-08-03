@@ -68,7 +68,7 @@ async fn main() -> anyhow::Result<()> {
     let height_provider = HeightProvider::new(OneHeightLoader);
     let status_store = Arc::new(MemStatusStore::new(0));
     let engine = SyncEngine::builder(status_store.clone())
-        .add_synchronizer(RangeHandler.into_sync(coordinator)?, &[&height_provider])?
+        .add_synchronizer(RangeHandler.into_sync(coordinator), &[&height_provider])?
         .add_height_provider(height_provider)?
         .build();
     let engine_handle = engine.run();

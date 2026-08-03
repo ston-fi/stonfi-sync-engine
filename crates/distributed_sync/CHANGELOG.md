@@ -12,6 +12,10 @@ here.
 - Return the private sync adapter from `DistributedHandler::into_sync` so it can
   be registered directly; convert it explicitly to a core `Synchronizer` only
   when its progress is an upstream dependency.
+- Make `DistributedHandler::into_sync` infallible, share one absolute deadline
+  across distributed task attempts, and pass polling, reconnect, and lifecycle
+  durations through standard Tokio semantics. Millisecond wire values saturate
+  to `u64::MAX` only on numeric overflow.
 
 ## [0.0.1](https://github.com/ston-fi/stonfi-sync-engine/releases/tag/v0.0.1) - 2026-08-03
 

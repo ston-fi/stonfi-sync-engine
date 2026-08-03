@@ -67,11 +67,8 @@ pub trait DistributedHandler: Send + Sync + 'static {
     /// into a [`Synchronizer`] first when another handler depends on its
     /// progress.
     ///
-    /// # Errors
-    ///
-    /// Returns an error when the synchronization timeout cannot be represented
-    /// by the distributed protocol.
-    fn into_sync(self, coordinator: Coordinator) -> SyncCoreResult<impl SyncHandler + Into<Synchronizer>>
+    #[must_use = "register the returned adapter with SyncEngine"]
+    fn into_sync(self, coordinator: Coordinator) -> impl SyncHandler + Into<Synchronizer>
     where
         Self: Sized,
     {
@@ -138,7 +135,8 @@ pub trait DistributedHandler: Send + Sync + 'static {
     }
 
     /// Returns the end-to-end timeout for task creation, dispatch, processing,
-    /// and result handling.
+    /// and result handling. The core passes it to Tokio, while distributed task
+    /// attempts share an absolute deadline with millisecond wire precision.
     fn sync_timeout(&self) -> Duration {
         Duration::from_secs(10)
     }

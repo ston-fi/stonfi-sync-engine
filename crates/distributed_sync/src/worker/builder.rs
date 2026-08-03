@@ -1,7 +1,6 @@
 use super::{Inner, Worker};
 use crate::distributed_adapter::ErasedHandler;
 use crate::traits::DistributedHandler;
-use crate::utils::{validate_timeout, validate_timeout_millis};
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::num::NonZeroUsize;
@@ -101,8 +100,8 @@ impl Builder {
     ///
     /// # Errors
     ///
-    /// Returns an error for invalid transport or lifecycle configuration, an
-    /// unavailable CPU parallelism value, identifier exhaustion, or no handlers.
+    /// Returns an error for invalid transport configuration, an unavailable CPU
+    /// parallelism value, identifier exhaustion, or no handlers.
     pub fn build(self) -> SyncCoreResult<Worker> {
         if self.handlers.is_empty() {
             return Err(SyncCoreError::invalid_args("worker requires at least one handler"));
@@ -113,9 +112,6 @@ impl Builder {
                 "worker endpoint must use the trusted-network http scheme",
             ));
         }
-        validate_timeout_millis(self.polling_timeout, "worker polling timeout")?;
-        validate_timeout(self.reconnect_delay, "worker reconnect delay")?;
-        validate_timeout(self.shutdown_timeout, "worker shutdown timeout")?;
         let parallelism = match self.parallelism {
             Some(parallelism) => parallelism,
             None => std::thread::available_parallelism().map_err(SyncCoreError::system)?,

@@ -8,7 +8,6 @@ pub use types::TaskPriority;
 use crate::distributed_adapter::ErasedHandler;
 use crate::proto::complete_request::Outcome;
 use crate::proto::{CompleteRequest, TaskAssignment};
-use crate::utils::timeout_deadline;
 use metrics::{CoordinatorMetrics, CoordinatorTaskStatus};
 use parking_lot::Mutex;
 use queue::TaskQueue;
@@ -92,8 +91,7 @@ impl Inner {
 
         loop {
             let elapsed = started_at.elapsed();
-            let remaining = deadline.instant.saturating_duration_since(tokio::time::Instant::now());
-            if remaining.is_zero() {
+            if deadline.instant <= tokio::time::Instant::now() {
                 CoordinatorMetrics::complete(&id, CoordinatorTaskStatus::TimedOut, elapsed);
                 return Err(SyncCoreError::net(format!(
                     "distributed task for handler '{id}' reached its deadline"
@@ -180,7 +178,6 @@ impl Inner {
         polling_timeout: Duration,
         service_tasks_enabled: bool,
     ) -> SyncCoreResult<Option<TaskAssignment>> {
-        let deadline = timeout_deadline(polling_timeout, "task polling timeout")?;
         let poll = async {
             loop {
                 let notified = self.task_available.notified();
@@ -190,7 +187,7 @@ impl Inner {
                 notified.await;
             }
         };
-        match tokio::time::timeout_at(deadline, poll).await {
+        match tokio::time::timeout(polling_timeout, poll).await {
             Ok(result) => result.map(Some),
             Err(_) => Ok(None),
         }
@@ -354,7 +351,7 @@ mod tests {
         let timeout = Duration::from_millis(100);
         let handler: Arc<dyn ErasedHandler> = Arc::new(TestHandler(timeout));
         let coordinator_for_task = coordinator.clone();
-        let deadline = TaskDeadline::new(timeout)?;
+        let deadline = TaskDeadline::new(timeout);
         let task = tokio::spawn(async move { coordinator_for_task.handle_task(handler, vec![1], deadline).await });
 
         let first = coordinator
@@ -391,7 +388,7 @@ mod tests {
         let timeout = Duration::from_millis(100);
         let handler: Arc<dyn ErasedHandler> = Arc::new(TestHandler(timeout));
         let coordinator_for_task = coordinator.clone();
-        let deadline = TaskDeadline::new(timeout)?;
+        let deadline = TaskDeadline::new(timeout);
         let task = tokio::spawn(async move { coordinator_for_task.handle_task(handler, vec![1], deadline).await });
 
         tokio::task::yield_now().await;
@@ -430,7 +427,7 @@ mod tests {
         let timeout = Duration::from_millis(100);
         let handler: Arc<dyn ErasedHandler> = Arc::new(TestHandler(timeout));
         let coordinator_for_task = coordinator.clone();
-        let deadline = TaskDeadline::new(timeout)?;
+        let deadline = TaskDeadline::new(timeout);
         let task = tokio::spawn(async move { coordinator_for_task.handle_task(handler, vec![1], deadline).await });
 
         let assignment = coordinator
@@ -458,7 +455,7 @@ mod tests {
         let timeout = Duration::from_secs(2);
         let handler: Arc<dyn ErasedHandler> = Arc::new(TestHandler(timeout));
         let coordinator_for_task = coordinator.clone();
-        let deadline = TaskDeadline::new(timeout)?;
+        let deadline = TaskDeadline::new(timeout);
         let deadline_unix_ms = deadline.unix_ms;
         let task = tokio::spawn(async move { coordinator_for_task.handle_task(handler, vec![1], deadline).await });
 

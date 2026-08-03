@@ -36,7 +36,7 @@ impl SyncHandler for Handler {
 fn main() -> SyncCoreResult<()> {
     let source = HeightProvider::new(Source);
     let _engine = SyncEngine::builder(Arc::new(MemStatusStore::new(0)))
-        .with_shutdown_timeout(Duration::from_secs(1))?
+        .with_shutdown_timeout(Duration::from_secs(1))
         .add_synchronizer(Handler, &[&source])?
         .add_height_provider(source)?
         .build();

@@ -128,6 +128,9 @@ provide compare-and-set coordination.
   with the same previous height.
 - Returning `Ok(None)` from [`SyncHandler::sync_range`] defers that range until
   an upstream progress provider advances again.
+- [`SyncHandler::sync_timeout`] and the configured lifecycle shutdown timeout
+  are passed directly to Tokio. A zero duration therefore uses Tokio's normal
+  ready-first timeout behavior.
 - `allow_rewind()` permits a handler to publish a lower height. Upstream
   decreases do not rewind dependants or cancel an active wait; later waits use
   current progress-provider values.
@@ -223,6 +226,7 @@ cargo package --list --locked -p stonfi_sync_core
 [`SyncEngine::run`]: crate::sync_engine::SyncEngine::run
 [`SyncHandler`]: crate::sync_engine::SyncHandler
 [`SyncHandler::sync_range`]: crate::sync_engine::SyncHandler::sync_range
+[`SyncHandler::sync_timeout`]: crate::sync_engine::SyncHandler::sync_timeout
 [`INITIAL_HEIGHT`]: crate::sync_engine::INITIAL_HEIGHT
 [`HeightLoader`]: crate::sync_engine::HeightLoader
 [`SyncStatusStore`]: crate::sync_engine::SyncStatusStore

@@ -46,6 +46,12 @@ transport-generated protobuf types private. `TaskBatch` owns ordered tasks and
 the height committed after successful result handling. Empty batches are valid.
 `RangeTask` has public fields as an intentional passive serialization contract;
 types with invariants should keep fields private.
+`DistributedHandler::into_sync` is infallible. Handler durations pass through
+the core Tokio timeout and also initialize the absolute deadline shared by
+non-empty distributed task attempts. Pass polling, reconnect, and lifecycle
+durations through standard Tokio semantics without zero-specific normalization
+or validation. Millisecond wire values saturate to `u64::MAX` only on numeric
+overflow.
 Library diagnostics use `tracing`; applications own subscriber configuration.
 Height-bearing APIs use the core `u64` `SyncHeight` domain and preserve `0` as
 the initial no-progress sentinel. Handler retry and range controls use
@@ -147,8 +153,9 @@ registration, names, labels, or increments.
 
 Production paths must not use `unwrap`, `expect`, or panic-driven control flow.
 Validate malformed payloads, missing completion outcomes, invalid endpoints,
-zero/overflowing durations, duplicate handlers, stale completions, and
-identifier/parallelism conversions at the owning boundary.
+duplicate handlers, stale completions, and identifier/parallelism conversions
+at the owning boundary. Millisecond wire values saturate only when they exceed
+`u64`.
 
 Tests should cover owned queue ordering, retries, stale attempts, timeout and
 cancellation cleanup, ordered results, concurrency, service exclusivity, and
@@ -161,7 +168,7 @@ Avoid these mistakes:
 - re-exporting `stonfi_sync_core` or generated protobuf modules;
 - accepting a detached atomic stop flag or spawning unowned progress tasks;
 - using task or worker IDs as unbounded metric labels;
-- silently coercing invalid timeout or parallelism values;
+- adding special zero-duration behavior instead of using Tokio semantics;
 - treating successful RPC receipt as exactly-once task execution;
 - adding durable-queue claims to this in-memory coordinator.
 

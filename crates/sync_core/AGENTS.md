@@ -109,6 +109,8 @@ engine or status-store height domain.
   through `allow_rewind()`; subsequent waits use current provider values.
 - Retry loops are cooperative. Consumer futures must return or enforce their
   own timeout if bounded shutdown latency is required.
+- Pass `SyncHandler::sync_timeout()` and lifecycle shutdown durations directly
+  to Tokio without zero-specific normalization or validation.
 - Do not add parallel builders, aliases, convenience re-exports, or alternate
   lifecycle APIs without a demonstrated downstream need.
 - Production paths must not use `unwrap()`, `expect()`, or panic-driven control

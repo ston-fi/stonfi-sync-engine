@@ -6,7 +6,7 @@ use crate::sync_engine::traits::ProgressProvider;
 use crate::sync_engine::{INITIAL_HEIGHT, SyncCallback, SyncEngine, SyncHeight, SyncStatusStore};
 use std::collections::HashSet;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 const DEFAULT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -106,19 +106,9 @@ impl Builder {
     }
 
     /// Sets the maximum duration for [`RunHandle::shutdown`](crate::sync_engine::RunHandle::shutdown).
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when `timeout` is zero or too large for an instant.
-    pub fn with_shutdown_timeout(mut self, timeout: Duration) -> SyncCoreResult<Self> {
-        if timeout.is_zero() {
-            return Err(SyncCoreError::invalid_args("engine shutdown timeout must be positive"));
-        }
-        if Instant::now().checked_add(timeout).is_none() {
-            return Err(SyncCoreError::invalid_args("engine shutdown timeout is too large"));
-        }
+    pub fn with_shutdown_timeout(mut self, timeout: Duration) -> Self {
         self.shutdown_timeout = timeout;
-        Ok(self)
+        self
     }
 
     /// Finalizes the builder and returns the engine.

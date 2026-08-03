@@ -121,7 +121,7 @@ async fn test_shutdown_aborts_a_stuck_consumer_after_timeout() -> anyhow::Result
     let started = Arc::new(Notify::new());
     let dropped = Arc::new(AtomicBool::new(false));
     let engine = SyncEngine::builder(Arc::new(TestStatusStore::new(0)))
-        .with_shutdown_timeout(Duration::from_millis(20))?
+        .with_shutdown_timeout(Duration::from_millis(20))
         .add_height_provider(PendingHeightLoader {
             started: started.clone(),
             dropped: dropped.clone(),

@@ -229,7 +229,7 @@ async fn test_empty_batch_advances_without_a_worker() -> anyhow::Result<()> {
     init_test_metrics()?;
     let handler = TestHandler::new("empty-batch").with_tasks(Vec::new());
     let handler_state = handler.state();
-    let mut synchronizer = DistributedAdapter::new(handler, Coordinator::new())?;
+    let mut synchronizer = DistributedAdapter::new(handler, Coordinator::new());
 
     assert_eq!(synchronizer.sync_range(4, 7).await?, Some(7));
     assert_eq!(*handler_state.results.lock(), Some(Vec::new()));
@@ -282,7 +282,7 @@ async fn test_worker_shutdown_interrupts_long_poll() -> anyhow::Result<()> {
 async fn test_worker_shutdown_aborts_overlong_active_task() -> anyhow::Result<()> {
     init_test_metrics()?;
     let coordinator = Coordinator::new();
-    let mut synchronizer = DistributedAdapter::new(TestHandler::new("bounded-shutdown"), coordinator.clone())?;
+    let mut synchronizer = DistributedAdapter::new(TestHandler::new("bounded-shutdown"), coordinator.clone());
     let server = TaskServer::builder(coordinator)
         .with_listen_address("127.0.0.1:0".parse()?)
         .with_shutdown_timeout(Duration::from_secs(1))
@@ -352,7 +352,7 @@ where
     H: DistributedHandler,
 {
     let coordinator = Coordinator::new();
-    let synchronizer = DistributedAdapter::new(coordinator_handler, coordinator.clone())?;
+    let synchronizer = DistributedAdapter::new(coordinator_handler, coordinator.clone());
     let server = TaskServer::builder(coordinator)
         .with_listen_address("127.0.0.1:0".parse()?)
         .with_shutdown_timeout(Duration::from_secs(1))

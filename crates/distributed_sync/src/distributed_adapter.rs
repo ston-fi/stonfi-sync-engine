@@ -1,6 +1,5 @@
 use crate::coordinator::{Coordinator, TaskDeadline, TaskPriority};
 use crate::traits::{DistributedHandler, TaskPayload};
-use crate::utils::validate_timeout_millis;
 use futures::stream::{self, StreamExt, TryStreamExt};
 use std::sync::Arc;
 use std::time::Duration;
@@ -17,15 +16,14 @@ pub(crate) struct DistributedAdapter {
 }
 
 impl DistributedAdapter {
-    pub(crate) fn new<H>(handler: H, coordinator: Coordinator) -> SyncCoreResult<Self>
+    pub(crate) fn new<H>(handler: H, coordinator: Coordinator) -> Self
     where
         H: DistributedHandler,
     {
-        validate_timeout_millis(handler.sync_timeout(), "distributed handler synchronization timeout")?;
-        Ok(Self {
+        Self {
             handler: Arc::new(handler),
             coordinator,
-        })
+        }
     }
 }
 
@@ -37,7 +35,7 @@ impl SyncHandler for DistributedAdapter {
 
     async fn sync_range(&mut self, from: SyncHeight, to: SyncHeight) -> SyncCoreResult<Option<SyncHeight>> {
         let batch_timeout = self.handler.sync_timeout();
-        let task_deadline = TaskDeadline::new(batch_timeout)?;
+        let task_deadline = TaskDeadline::new(batch_timeout);
         let Some((synced_height, payloads)) = self.handler.create_tasks_bytes(from, to).await? else {
             return Ok(None);
         };
@@ -267,7 +265,7 @@ mod tests {
     async fn test_large_batch_limits_coordinator_ongoing_tasks() -> anyhow::Result<()> {
         stonfi_metrics::init_metrics!()?;
         let coordinator = Coordinator::new();
-        let mut adapter = DistributedAdapter::new(LargeBatchHandler, coordinator.clone())?;
+        let mut adapter = DistributedAdapter::new(LargeBatchHandler, coordinator.clone());
         let sync_task = tokio::spawn(async move { adapter.sync_range(1, 1).await });
 
         let mut assignments = VecDeque::with_capacity(MAX_ONGOING_TASKS);
@@ -307,7 +305,7 @@ mod tests {
         let handler = OrderingHandler {
             results: results.clone(),
         };
-        let mut adapter = DistributedAdapter::new(handler, coordinator.clone())?;
+        let mut adapter = DistributedAdapter::new(handler, coordinator.clone());
         let sync_task = tokio::spawn(async move { adapter.sync_range(1, 3).await });
 
         let mut assignments = Vec::new();
