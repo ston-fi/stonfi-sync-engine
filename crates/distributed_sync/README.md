@@ -14,15 +14,15 @@ their own subscriber.
 Height-bearing APIs use the core `u64` `SyncHeight` domain. Height `0` remains
 the core engine's initial no-progress sentinel.
 
-Depend on both workspace packages from the same revision:
+Depend on both workspace packages from the same release tag:
 
 ```toml
 [dependencies]
 anyhow = "1"
 async-trait = "0.1"
-stonfi_distributed_sync = { git = "https://github.com/ston-fi/stonfi-sync-engine", rev = "<revision>" }
+stonfi_distributed_sync = { git = "https://github.com/ston-fi/stonfi-sync-engine", tag = "v0.1.0" }
 stonfi_metrics = { version = "0.0.1", git = "https://github.com/ston-fi/stonfi-metrics", rev = "v0.0.1" }
-stonfi_sync_core = { git = "https://github.com/ston-fi/stonfi-sync-engine", rev = "<revision>" }
+stonfi_sync_core = { git = "https://github.com/ston-fi/stonfi-sync-engine", tag = "v0.1.0" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 ```
 

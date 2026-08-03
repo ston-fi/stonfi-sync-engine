@@ -56,7 +56,13 @@ RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc --workspace --no-deps --all
 cargo +1.95.0 check --workspace --all-features --locked
 cargo package --list --locked -p stonfi_sync_core
 cargo package --list --locked -p stonfi_distributed_sync
+bash .github/check-external-consumer.sh
+bash .github/check-semver.sh
 ```
 
 Packages are Git-distributed with `publish = false`. Do not change the
 distribution or versioning policy unless the task explicitly requires it.
+Stable coordinated workspace releases use a `vMAJOR.MINOR.PATCH` tag only when
+both package versions match it. The tag workflow reruns this full gate, checks
+the tag-to-manifest versions, and creates a GitHub Release without publishing
+to crates.io. Package versions otherwise remain independent.

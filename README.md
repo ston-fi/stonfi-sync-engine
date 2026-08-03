@@ -16,14 +16,18 @@ own package under `crates/`.
 protobuf, server, worker, serialization, and lifecycle concerns have an
 independent dependency and release boundary.
 
-## Using the core package
+## Installation
 
-Pin the package to a Git revision:
+The `v0.1.0` workspace tag contains both packages:
 
 ```toml
 [dependencies]
-stonfi_sync_core = { git = "https://github.com/ston-fi/stonfi-sync-engine", rev = "<revision>" }
+stonfi_distributed_sync = { git = "https://github.com/ston-fi/stonfi-sync-engine", tag = "v0.1.0" }
+stonfi_sync_core = { git = "https://github.com/ston-fi/stonfi-sync-engine", tag = "v0.1.0" }
 ```
+
+Package versions remain independent. A workspace tag is used only for a
+coordinated release where every package version matches the tag.
 
 See the [`stonfi_sync_core` README](crates/sync_core/README.md) for its API,
 runtime requirements, metrics initialization, lifecycle, and complete example.
@@ -43,4 +47,13 @@ RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc --workspace --no-deps --all
 cargo +1.95.0 check --workspace --all-features --locked
 cargo package --list --locked -p stonfi_sync_core
 cargo package --list --locked -p stonfi_distributed_sync
+bash .github/check-external-consumer.sh
+bash .github/check-semver.sh
 ```
+
+## Releases
+
+Pull requests and `main` run the reusable CI workflow. Pushing a stable
+`vMAJOR.MINOR.PATCH` tag runs the same complete gate, verifies that the tag
+matches both package manifests, and creates the corresponding GitHub Release.
+The packages are Git-distributed and are not published to crates.io.

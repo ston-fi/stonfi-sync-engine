@@ -1,4 +1,4 @@
-name: Build and test
+name: CI
 
 on:
   push:
@@ -6,10 +6,14 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -47,21 +51,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.95.0
       - run: bash .github/check-external-consumer.sh
 
-  release:
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-    needs: [quality, msrv, external-consumer]
+  semver:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pull-requests: write
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: Swatinem/rust-cache@v2
       - uses: dtolnay/rust-toolchain@stable
-      - uses: release-plz/action@v0.5
+      - uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853
         with:
-          version: "0.3.160"
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          tool: cargo-semver-checks@0.48.0
+      - run: bash .github/check-semver.sh
