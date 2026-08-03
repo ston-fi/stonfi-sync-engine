@@ -42,11 +42,7 @@ impl Coordinator {
         self.inner.handle_task(handler, payload, deadline).await
     }
 
-    pub(crate) async fn poll(
-        &self,
-        polling_timeout: Duration,
-        service_tasks_enabled: bool,
-    ) -> SyncCoreResult<Option<TaskAssignment>> {
+    pub(crate) async fn poll(&self, polling_timeout: Duration, service_tasks_enabled: bool) -> Option<TaskAssignment> {
         self.inner.poll(polling_timeout, service_tasks_enabled).await
     }
 
@@ -173,27 +169,20 @@ impl Inner {
         receiver
     }
 
-    async fn poll(
-        &self,
-        polling_timeout: Duration,
-        service_tasks_enabled: bool,
-    ) -> SyncCoreResult<Option<TaskAssignment>> {
+    async fn poll(&self, polling_timeout: Duration, service_tasks_enabled: bool) -> Option<TaskAssignment> {
         let poll = async {
             loop {
                 let notified = self.task_available.notified();
-                if let Some(assignment) = self.pop(service_tasks_enabled)? {
-                    return Ok(assignment);
+                if let Some(assignment) = self.pop(service_tasks_enabled) {
+                    return assignment;
                 }
                 notified.await;
             }
         };
-        match tokio::time::timeout(polling_timeout, poll).await {
-            Ok(result) => result.map(Some),
-            Err(_) => Ok(None),
-        }
+        tokio::time::timeout(polling_timeout, poll).await.ok()
     }
 
-    fn pop(&self, service_tasks_enabled: bool) -> SyncCoreResult<Option<TaskAssignment>> {
+    fn pop(&self, service_tasks_enabled: bool) -> Option<TaskAssignment> {
         let (assignment, regular_size, service_size) = {
             let mut state = self.state.lock();
             let assignment = loop {
@@ -216,7 +205,7 @@ impl Inner {
             (assignment, regular_size, service_size)
         };
         CoordinatorMetrics::set_queue_sizes(regular_size, service_size);
-        Ok(assignment)
+        assignment
     }
 
     fn complete(&self, request: CompleteRequest) -> SyncCoreResult<()> {
@@ -356,7 +345,7 @@ mod tests {
 
         let first = coordinator
             .poll(Duration::from_secs(1), false)
-            .await?
+            .await
             .ok_or_else(|| anyhow::anyhow!("first assignment was not dispatched"))?;
         coordinator.complete(CompleteRequest {
             worker_id: "worker".to_owned(),
@@ -364,10 +353,10 @@ mod tests {
             outcome: Some(Outcome::ErrorMessage("retry".to_owned())),
         })?;
 
-        assert!(coordinator.poll(Duration::from_millis(5), false).await?.is_none());
+        assert!(coordinator.poll(Duration::from_millis(5), false).await.is_none());
         let second = coordinator
             .poll(Duration::from_secs(1), false)
-            .await?
+            .await
             .ok_or_else(|| anyhow::anyhow!("retried assignment was not dispatched"))?;
         assert_ne!(first.assignment_id, second.assignment_id);
         assert_eq!(first.deadline_unix_ms, second.deadline_unix_ms);
@@ -397,7 +386,7 @@ mod tests {
         tokio::task::yield_now().await;
 
         assert_eq!(coordinator.queued_task_count(), 0);
-        assert!(coordinator.poll(Duration::from_millis(10), false).await?.is_none());
+        assert!(coordinator.poll(Duration::from_millis(10), false).await.is_none());
         Ok(())
     }
 
@@ -432,7 +421,7 @@ mod tests {
 
         let assignment = coordinator
             .poll(Duration::from_secs(1), false)
-            .await?
+            .await
             .ok_or_else(|| anyhow::anyhow!("assignment was not dispatched"))?;
         assert!(task.await?.is_err());
 
@@ -465,7 +454,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(50)).await;
         let assignment = coordinator
             .poll(Duration::from_secs(1), false)
-            .await?
+            .await
             .ok_or_else(|| anyhow::anyhow!("assignment was not dispatched"))?;
 
         assert_eq!(assignment.deadline_unix_ms, deadline_unix_ms);

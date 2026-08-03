@@ -34,11 +34,7 @@ impl TaskServiceImpl {
             observer.poll_started();
         }
         let polling_timeout = Duration::from_millis(request.polling_timeout_ms);
-        let task = self
-            .coordinator
-            .poll(polling_timeout, request.service_tasks_enabled)
-            .await
-            .map_err(sync_error_to_status)?;
+        let task = self.coordinator.poll(polling_timeout, request.service_tasks_enabled).await;
         Ok(PollResponse { task })
     }
 

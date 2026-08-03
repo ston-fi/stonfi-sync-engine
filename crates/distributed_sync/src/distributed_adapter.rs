@@ -273,11 +273,11 @@ mod tests {
             assignments.push_back(
                 coordinator
                     .poll(Duration::from_secs(1), false)
-                    .await?
+                    .await
                     .ok_or_else(|| anyhow::anyhow!("expected a buffered assignment"))?,
             );
         }
-        assert!(coordinator.poll(Duration::from_millis(10), false).await?.is_none());
+        assert!(coordinator.poll(Duration::from_millis(10), false).await.is_none());
 
         let first = assignments
             .pop_front()
@@ -285,7 +285,7 @@ mod tests {
         complete_assignment(&coordinator, first.assignment_id)?;
         let final_assignment = coordinator
             .poll(Duration::from_secs(1), false)
-            .await?
+            .await
             .ok_or_else(|| anyhow::anyhow!("expected the final buffered assignment"))?;
 
         for assignment in assignments {
@@ -313,7 +313,7 @@ mod tests {
             assignments.push(
                 coordinator
                     .poll(Duration::from_secs(1), false)
-                    .await?
+                    .await
                     .ok_or_else(|| anyhow::anyhow!("expected an assignment"))?,
             );
         }
