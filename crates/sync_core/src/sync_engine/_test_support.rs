@@ -106,7 +106,7 @@ impl SyncStatusStore for TestStatusStore {
         if handler_id == INITIAL_HEIGHT
             && self
                 .initial_save_failures
-                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| remaining.checked_sub(1))
+                .try_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| remaining.checked_sub(1))
                 .is_ok()
         {
             return Err(SyncCoreError::custom("configured initial save failure"));
