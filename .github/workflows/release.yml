@@ -1,32 +1,76 @@
-name: Release
+name: Release-plz
 
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_run:
+    workflows: ["CI"]
+    branches: [main]
+    types: [completed]
 
 permissions: {}
 
 jobs:
-  validate:
-    permissions:
-      contents: read
-    uses: ./.github/workflows/build.yml
-
-  github-release:
-    needs: validate
+  release-plz-release:
+    if: github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
-    concurrency:
-      group: github-release-${{ github.ref }}
-      cancel-in-progress: false
     permissions:
       contents: write
+      pull-requests: read
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@1.95.0
-      - name: Publish GitHub Release
+          persist-credentials: false
+          ref: ${{ github.event.repository.default_branch }}
+      - name: Verify the checked-out commit passed CI
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: bash .github/publish-github-release.sh "$GITHUB_REF_NAME" "$GITHUB_SHA"
+          TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          checked_out_sha=$(git rev-parse HEAD)
+          if [ "$checked_out_sha" != "$TESTED_SHA" ]; then
+            echo "::error::Refusing to release untested commit $checked_out_sha; CI passed for $TESTED_SHA"
+            exit 1
+          fi
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Publish releases
+        uses: release-plz/action@v0.5
+        with:
+          command: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_REGISTRY_TOKEN }}
+
+  release-plz-pr:
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    concurrency:
+      group: release-plz-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.event.repository.default_branch }}
+      - name: Verify the checked-out commit passed CI
+        env:
+          TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          checked_out_sha=$(git rev-parse HEAD)
+          if [ "$checked_out_sha" != "$TESTED_SHA" ]; then
+            echo "::error::Refusing to update the release PR from untested commit $checked_out_sha; CI passed for $TESTED_SHA"
+            exit 1
+          fi
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Update release pull request
+        uses: release-plz/action@v0.5
+        with:
+          command: release-pr
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

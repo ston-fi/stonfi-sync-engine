@@ -6,7 +6,6 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
-  workflow_call:
 
 permissions:
   contents: read
@@ -34,6 +33,7 @@ jobs:
       - run: RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc --workspace --no-deps --all-features --locked
       - run: cargo package --list --locked -p stonfi_sync_core
       - run: cargo package --list --locked -p stonfi_distributed_sync
+      - run: cargo publish --dry-run --locked -p stonfi_sync_core
 
   msrv:
     runs-on: ubuntu-latest
@@ -50,40 +50,3 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - uses: dtolnay/rust-toolchain@1.95.0
       - run: bash .github/check-external-consumer.sh
-
-  semver:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853
-        with:
-          tool: cargo-semver-checks@0.48.0
-      - run: bash .github/check-semver.sh
-
-  github-release:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [quality, msrv, external-consumer, semver]
-    runs-on: ubuntu-latest
-    concurrency:
-      group: github-release-main
-      cancel-in-progress: false
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@1.95.0
-      - name: Resolve release tag
-        id: release
-        run: |
-          version=$(cargo metadata --locked --no-deps --format-version 1 | jq -er \
-            '.packages[] | select(.name == "stonfi_sync_core") | .version')
-          echo "tag=v$version" >> "$GITHUB_OUTPUT"
-      - name: Publish GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: bash .github/publish-github-release.sh "${{ steps.release.outputs.tag }}" "$GITHUB_SHA"

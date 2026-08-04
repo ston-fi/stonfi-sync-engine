@@ -980,7 +980,7 @@ dependencies = [
 
 [[package]]
 name = "stonfi_distributed_sync"
-version = "0.0.3"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1004,8 +1004,9 @@ dependencies = [
 
 [[package]]
 name = "stonfi_metrics"
-version = "0.0.1"
-source = "git+https://github.com/ston-fi/stonfi-metrics?rev=v0.0.1#32f7b2404506f38771f4dea3fe58f747844ba7c2"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "36879e49370869451cfb8f2a22e6f165f87a962d0b20979e2697fb0b72569bbf"
 dependencies = [
  "anyhow",
  "axum",
@@ -1017,7 +1018,7 @@ dependencies = [
 
 [[package]]
 name = "stonfi_sync_core"
-version = "0.0.3"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",

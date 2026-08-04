@@ -1,8 +1,8 @@
 # STON.fi Sync Engine Workspace Agent Guide
 
-This repository is a public Rust library workspace distributed through Git
-tags. Use the `rust-library-review` skill for non-trivial reviews,
-implementations, refactors, and workspace changes.
+This repository is a public Rust library workspace published on crates.io and
+released through Git tags. Use the `rust-library-review` skill for non-trivial
+reviews, implementations, refactors, and workspace changes.
 
 ## Workspace boundary
 
@@ -56,16 +56,15 @@ RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc --workspace --no-deps --all
 cargo +1.95.0 check --workspace --all-features --locked
 cargo package --list --locked -p stonfi_sync_core
 cargo package --list --locked -p stonfi_distributed_sync
+cargo publish --dry-run --locked -p stonfi_sync_core
 bash .github/check-external-consumer.sh
-bash .github/check-semver.sh
 ```
 
-Packages are Git-distributed with `publish = false`. Do not change the
-distribution or versioning policy unless the task explicitly requires it.
-Stable coordinated workspace releases use a `vMAJOR.MINOR.PATCH` tag only when
-both package versions match it. The tag workflow reruns this full gate, checks
-the tag-to-manifest versions, and creates a GitHub Release without publishing
-to crates.io. Successful `main` CI creates a missing coordinated tag and
-GitHub Release directly because tags pushed with `GITHUB_TOKEN` do not trigger
-another workflow. A manually pushed tag remains the recovery path and reruns
-the same gate. Package versions otherwise remain independent.
+Packages are published to crates.io. Do not change the distribution or
+versioning policy unless the task explicitly requires it.
+After successful `main` CI, release-plz owns version and changelog pull
+requests, dependency-ordered crates.io publishing, package-specific tags, and
+GitHub Releases. Configure the repository secret `CRATES_IO_REGISTRY_TOKEN`
+with `publish-new` and `publish-update` scopes, and allow GitHub Actions to
+create pull requests in the repository workflow settings. Package versions
+remain independent.

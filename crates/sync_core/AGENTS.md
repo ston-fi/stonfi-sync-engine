@@ -1,7 +1,7 @@
 # `stonfi_sync_core` Agent Guide
 
-This package is a public Rust library distributed through Git tags as part of
-the `stonfi-sync-engine` workspace.
+This package is a public Rust library published on crates.io and released
+through Git tags as part of the `stonfi-sync-engine` workspace.
 Use the `rust-library-review` skill for non-trivial reviews, implementations,
 and refactors.
 
@@ -55,9 +55,9 @@ engine definition and returns the runtime owner. Use `RunHandle::shutdown` for
 bounded awaited shutdown; dropping the handle only signals best-effort
 shutdown. Use `RunHandle::wait` only when every task can finish naturally.
 
-Consumers use the Git dependency documented in `README.md`. The crate requires
-a running Tokio runtime before `SyncEngine::run` is called and returns typed
-`SyncCoreError` values for configuration and consumer failures.
+Consumers use the crates.io dependency documented in `README.md`. The crate
+requires a running Tokio runtime before `SyncEngine::run` is called and returns
+typed `SyncCoreError` values for configuration and consumer failures.
 Library diagnostics use `tracing` without embedded ANSI escapes; applications
 own subscriber configuration. Do not add terminal styling to library messages.
 `SyncEngine::builder` is infallible because it only stores the status store;
@@ -150,7 +150,9 @@ cargo +nightly fmt --check
 RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc -p stonfi_sync_core --no-deps --all-features --locked
 cargo +1.95.0 check -p stonfi_sync_core --all-features --locked
 cargo package --list --locked -p stonfi_sync_core
+cargo publish --dry-run --locked -p stonfi_sync_core
 ```
 
-The package is Git-distributed with `publish = false`. Do not change the
-distribution or versioning policy unless the task explicitly requires it.
+Release-plz publishes this package before a changed `stonfi_distributed_sync`
+version that depends on it. Do not change the distribution or versioning policy
+unless the task explicitly requires it.

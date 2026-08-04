@@ -1,8 +1,9 @@
 # `stonfi_distributed_sync` Agent Guide
 
-This package is a public Rust library distributed through Git tags as part of
-the `stonfi-sync-engine` workspace. Use the `rust-library-review` skill for
-non-trivial reviews, implementations, and refactors.
+This package is a public Rust library published on crates.io and released
+through Git tags as part of the `stonfi-sync-engine` workspace. Use the
+`rust-library-review` skill for non-trivial reviews, implementations, and
+refactors.
 
 ## Responsibility and non-goals
 
@@ -69,8 +70,8 @@ not add configuration structs, builder re-exports, or parallel construction path
 Worker parallelism defaults to `std::thread::available_parallelism()` and can be
 overridden explicitly. Validate invariants before spawning background tasks.
 
-Downstream applications depend on both Git-distributed packages from the same
-workspace revision, as documented in `README.md`.
+Downstream applications depend on both crates.io packages at compatible
+versions, as documented in `README.md`.
 
 Initialize `stonfi_metrics`, create the shared coordinator plus independent
 coordinator-side and worker-side handlers, start the server and workers, and
@@ -202,8 +203,10 @@ RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc --workspace --no-deps --all
 cargo +1.95.0 check --workspace --all-features --locked
 cargo package --list --locked -p stonfi_sync_core
 cargo package --list --locked -p stonfi_distributed_sync
+cargo publish --dry-run --locked -p stonfi_sync_core
 ```
 
 Also compile a fresh external consumer and inspect Cargo metadata/package
-contents for private dependency origins. The package is Git-distributed with
-`publish = false`; do not change that policy unless explicitly requested.
+contents for private dependency origins. Release-plz owns dependency-ordered
+publishing and releases `stonfi_sync_core` before this package when required. Do
+not replace that native release flow unless explicitly requested.

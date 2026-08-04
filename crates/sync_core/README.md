@@ -30,12 +30,12 @@ external coordinates into the engine's height domain.
 
 ## Installation
 
-Depend on the crate from the Git repository at the release tag:
+Depend on the crate from crates.io:
 
 ```toml
 [dependencies]
-stonfi_sync_core = { git = "https://github.com/ston-fi/stonfi-sync-engine", tag = "v0.0.3" }
-stonfi_metrics = { version = "0.0.1", git = "https://github.com/ston-fi/stonfi-metrics", rev = "v0.0.1" }
+stonfi_metrics = "0.1"
+stonfi_sync_core = "0.1"
 ```
 
 The crate requires a Tokio runtime. Implement [`HeightLoader`] for each source,
@@ -211,6 +211,7 @@ cargo clippy -p stonfi_sync_core --all-targets --all-features --locked -- -D war
 RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc -p stonfi_sync_core --no-deps --all-features --locked
 cargo +1.95.0 check -p stonfi_sync_core --all-features --locked
 cargo package --list --locked -p stonfi_sync_core
+cargo publish --dry-run --locked -p stonfi_sync_core
 ```
 
 [`Builder`]: crate::sync_engine::Builder

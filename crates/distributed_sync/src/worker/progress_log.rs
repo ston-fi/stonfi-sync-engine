@@ -24,12 +24,13 @@ pub(super) async fn progress_log_loop(cancellation: CancellationToken, logging_p
 }
 
 fn task_stats_snapshot() -> Vec<(String, WorkerTaskStats)> {
-    let mut ids = WorkerMetrics::task_ids();
-    ids.sort_unstable();
-    ids.into_iter()
-        .map(|id| {
-            let stats = WorkerMetrics::task_stats(&id);
-            (id, stats)
+    let mut handler_ids = WorkerMetrics::task_ids();
+    handler_ids.sort_unstable();
+    handler_ids
+        .into_iter()
+        .map(|handler_id| {
+            let stats = WorkerMetrics::task_stats(&handler_id);
+            (handler_id, stats)
         })
         .collect()
 }
@@ -40,27 +41,32 @@ fn period_deltas(
 ) -> Vec<(String, WorkerTaskStats)> {
     current_stats
         .into_iter()
-        .map(|(id, current)| {
-            let previous = previous_stats.insert(id.clone(), current).unwrap_or_default();
-            (id, current.saturating_delta(previous))
+        .map(|(handler_id, current)| {
+            let previous = previous_stats.insert(handler_id.clone(), current).unwrap_or_default();
+            (handler_id, current.saturating_delta(previous))
         })
         .collect()
 }
 
 fn format_task_stats(stats: &[(String, WorkerTaskStats)]) -> String {
-    let sync_width = stats.iter().map(|(id, _)| id.len()).max().unwrap_or_default().max("sync".len());
+    let handler_id_width = stats
+        .iter()
+        .map(|(handler_id, _)| handler_id.len())
+        .max()
+        .unwrap_or_default()
+        .max("handler_id".len());
     let mut output = format!(
-        "processed task stat:\n  {sync:<sync_width$} | {received:>COUNTER_WIDTH$} | {processed:>COUNTER_WIDTH$} | {failed:>COUNTER_WIDTH$} | {timed_out:>COUNTER_WIDTH$} | {completion_failed:>COUNTER_WIDTH$}\n",
-        sync = "sync",
+        "processed task stat:\n  {handler_id:<handler_id_width$} | {received:>COUNTER_WIDTH$} | {processed:>COUNTER_WIDTH$} | {failed:>COUNTER_WIDTH$} | {timed_out:>COUNTER_WIDTH$} | {completion_failed:>COUNTER_WIDTH$}\n",
+        handler_id = "handler_id",
         received = "rcv",
         processed = "ok",
         failed = "err",
         timed_out = "timeout",
         completion_failed = "fail",
     );
-    for (id, stats) in stats {
+    for (handler_id, stats) in stats {
         output.push_str(&format!(
-            "  {id:<sync_width$} | {received:>COUNTER_WIDTH$} | {processed:>COUNTER_WIDTH$} | {failed:>COUNTER_WIDTH$} | {timed_out:>COUNTER_WIDTH$} | {completion_failed:>COUNTER_WIDTH$}\n",
+            "  {handler_id:<handler_id_width$} | {received:>COUNTER_WIDTH$} | {processed:>COUNTER_WIDTH$} | {failed:>COUNTER_WIDTH$} | {timed_out:>COUNTER_WIDTH$} | {completion_failed:>COUNTER_WIDTH$}\n",
             received = stats.received,
             processed = stats.processed,
             failed = stats.failed,
@@ -69,4 +75,14 @@ fn format_task_stats(stats: &[(String, WorkerTaskStats)]) -> String {
         ));
     }
     output
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_task_stats;
+
+    #[test]
+    fn test_task_stats_header_uses_handler_id() {
+        assert!(format_task_stats(&[]).contains("\n  handler_id |"));
+    }
 }

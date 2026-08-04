@@ -5,8 +5,8 @@ gRPC workers. A coordinator creates an in-memory task batch, workers process the
 tasks concurrently, and the coordinator advances only after it receives and
 accepts every ordered result.
 
-The crate is distributed from the
-[`stonfi-sync-engine`](https://github.com/ston-fi/stonfi-sync-engine) Git
+The crate is published from the
+[`stonfi-sync-engine`](https://github.com/ston-fi/stonfi-sync-engine)
 repository. It requires Rust 1.95 or newer and a Tokio runtime.
 Diagnostics are emitted through `tracing`; applications install and configure
 their own subscriber. Processing-stat logging is disabled by default. Set a
@@ -18,15 +18,15 @@ completion-RPC-failed tasks at that interval.
 Height-bearing APIs use the core `u64` `SyncHeight` domain. Height `0` remains
 the core engine's initial no-progress sentinel.
 
-Depend on both workspace packages from the same release tag:
+Depend on both workspace packages from crates.io:
 
 ```toml
 [dependencies]
 anyhow = "1"
 async-trait = "0.1"
-stonfi_distributed_sync = { git = "https://github.com/ston-fi/stonfi-sync-engine", tag = "v0.0.3" }
-stonfi_metrics = { version = "0.0.1", git = "https://github.com/ston-fi/stonfi-metrics", rev = "v0.0.1" }
-stonfi_sync_core = { git = "https://github.com/ston-fi/stonfi-sync-engine", tag = "v0.0.3" }
+stonfi_distributed_sync = "0.1"
+stonfi_metrics = "0.1"
+stonfi_sync_core = "0.1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 ```
 

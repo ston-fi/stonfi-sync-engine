@@ -1,8 +1,8 @@
 # STON.fi Sync Engine
 
 This repository is the public Rust workspace for STON.fi synchronization
-libraries. Each independently consumable synchronization layer lives in its
-own package under `crates/`.
+libraries published on crates.io. Each independently consumable synchronization
+layer lives in its own package under `crates/`.
 
 ## Packages
 
@@ -18,16 +18,16 @@ independent dependency and release boundary.
 
 ## Installation
 
-The `v0.0.3` workspace tag contains both packages:
+Version `0.1.0` is the first crates.io release of both packages:
 
 ```toml
 [dependencies]
-stonfi_distributed_sync = { git = "https://github.com/ston-fi/stonfi-sync-engine", tag = "v0.0.3" }
-stonfi_sync_core = { git = "https://github.com/ston-fi/stonfi-sync-engine", tag = "v0.0.3" }
+stonfi_distributed_sync = "0.1"
+stonfi_sync_core = "0.1"
 ```
 
-Package versions remain independent. A workspace tag is used only for a
-coordinated release where every package version matches the tag.
+Package versions remain independent. Release-plz creates a package-specific tag
+and GitHub Release for each published version.
 
 See the [`stonfi_sync_core` README](crates/sync_core/README.md) for its API,
 runtime requirements, metrics initialization, lifecycle, and complete example.
@@ -47,14 +47,21 @@ RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc --workspace --no-deps --all
 cargo +1.95.0 check --workspace --all-features --locked
 cargo package --list --locked -p stonfi_sync_core
 cargo package --list --locked -p stonfi_distributed_sync
+cargo publish --dry-run --locked -p stonfi_sync_core
 bash .github/check-external-consumer.sh
-bash .github/check-semver.sh
 ```
 
 ## Releases
 
-Pull requests and `main` run the reusable CI workflow. After every required
-check passes on `main`, CI creates the missing coordinated
-`vMAJOR.MINOR.PATCH` tag and GitHub Release for the versions in both manifests.
-Manually pushed stable tags run the same complete gate as a recovery path. The
-packages are Git-distributed and are not published to crates.io.
+After `main` passes CI, release-plz publishes any package version not yet on
+crates.io, creates its tag and GitHub Release, and creates or updates the next
+release pull request with version and changelog changes. It resolves workspace
+dependencies so `stonfi_sync_core` is published before
+`stonfi_distributed_sync`.
+
+Configure the repository secret `CRATES_IO_REGISTRY_TOKEN` with a crates.io
+token that has `publish-new` and `publish-update` scopes before merging this
+release. The first successful release-plz run publishes version `0.1.0` of both
+currently new crates. In **Settings → Actions → General → Workflow
+permissions**, enable **Allow GitHub Actions to create and approve pull
+requests** so release-plz can maintain its release pull request.
