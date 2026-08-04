@@ -16,7 +16,6 @@ AND durable_writes = true;
 ";
 
 #[tokio::test]
-#[ignore = "requires Docker"]
 async fn test_scylla_progress_store_end_to_end() -> anyhow::Result<()> {
     stonfi_metrics::init_metrics!()?;
 

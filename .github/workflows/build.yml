@@ -43,15 +43,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.95.0
       - run: cargo check --workspace --all-features --locked
 
-  scylla-integration:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: Swatinem/rust-cache@v2
-      - uses: dtolnay/rust-toolchain@stable
-      - run: docker info
-      - run: cargo test -p stonfi_sync_core --features scylla --test scylla_progress_store --locked -- --ignored --test-threads=1
-
   external-consumer:
     runs-on: ubuntu-latest
     steps:
