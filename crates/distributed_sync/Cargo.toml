@@ -24,26 +24,26 @@ include = [
 name = "stonfi_distributed_sync"
 
 [dependencies]
-anyhow = "1"
-async-trait = "0.1"
-bincode = { version = "2", features = ["derive"] }
-futures = "0.3"
-parking_lot = "0.12"
-prost = "0.14"
+anyhow.workspace = true
+async-trait.workspace = true
+bincode.workspace = true
+futures.workspace = true
+parking_lot.workspace = true
+prost.workspace = true
 stonfi_metrics.workspace = true
-stonfi_sync_core = { version = "0.1", path = "../sync_core" }
-strum = { version = "0.28", features = ["derive"] }
-tokio = { version = "1", features = ["net", "rt", "sync", "time"] }
-tokio-stream = { version = "0.1", features = ["net"] }
-tokio-util = { version = "0.7", default-features = false, features = ["rt"] }
-tonic = { version = "0.14", features = ["transport"] }
-tonic-prost = "0.14"
-tracing = "0.1"
+stonfi_sync_core.workspace = true
+strum.workspace = true
+tokio = { workspace = true, features = ["net", "rt", "sync", "time"] }
+tokio-stream = { workspace = true, features = ["net"] }
+tokio-util = { workspace = true, features = ["rt"] }
+tonic.workspace = true
+tonic-prost.workspace = true
+tracing.workspace = true
 
 [dev-dependencies]
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [build-dependencies]
-prost-build = "0.14"
-protoc-bin-vendored = "3"
-tonic-prost-build = "0.14"
+prost-build.workspace = true
+protoc-bin-vendored.workspace = true
+tonic-prost-build.workspace = true

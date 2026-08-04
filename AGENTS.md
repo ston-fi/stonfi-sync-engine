@@ -34,8 +34,9 @@ guide and the relevant package guide.
   development logs.
 - Review package contents from the workspace root with
   `cargo package --list -p <package>`.
-- Do not introduce shared workspace dependencies until at least two packages
-  use the same dependency policy and centralizing it reduces real drift.
+- Declare dependency versions and shared default-feature policies in the root
+  `[workspace.dependencies]` table. Crate manifests inherit them with
+  `workspace = true` and add only crate-specific features locally.
 
 ## Validation
 

@@ -9,4 +9,23 @@ license = "Apache-2.0"
 repository = "https://github.com/ston-fi/stonfi-sync-engine"
 
 [workspace.dependencies]
+anyhow = "1"
+async-trait = "0.1"
+bincode = { version = "2", features = ["derive"] }
+futures = "0.3"
+parking_lot = "0.12"
+prost = "0.14"
+prost-build = "0.14"
+protoc-bin-vendored = "3"
 stonfi_metrics = "0.1"
+stonfi_sync_core = { version = "0.1", path = "crates/sync_core" }
+strum = { version = "0.28", features = ["derive"] }
+thiserror = "2"
+tokio = "1"
+tokio-stream = "0.1"
+tokio-util = { version = "0.7", default-features = false }
+tonic = { version = "0.14", features = ["transport"] }
+tonic-prost = "0.14"
+tonic-prost-build = "0.14"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["env-filter", "fmt", "smallvec", "tracing-log"] }
