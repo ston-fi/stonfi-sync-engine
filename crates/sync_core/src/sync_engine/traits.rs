@@ -4,7 +4,7 @@ use crate::sync_engine::progress::ProgressReceiver;
 use std::time::Duration;
 
 /// Reserved initial-height key in the handler ID namespace.
-pub const INITIAL_HEIGHT: &str = "INITIAL_HEIGHT";
+pub const INITIAL_HEIGHT: &str = "INITIAL";
 
 /// Loads the latest upstream height.
 ///
