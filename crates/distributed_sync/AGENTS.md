@@ -39,8 +39,9 @@ on its progress. Register each worker-side instance with
 only the handler type and stable ID are shared across binaries. A handler ID
 must be stable and identical in every coordinator and worker binary.
 `SyncEngine`'s builder owns ID validation when the synchronizer is registered;
-distributed constructors do not duplicate it. Initial-height configuration
-belongs to the core `SyncProgressStore`, not to distributed handlers.
+distributed constructors do not duplicate it. Applications initialize the core
+`SyncProgressStore`; initial-height ownership does not belong to distributed
+handlers.
 
 Public fallible APIs return `stonfi_sync_core::errors::SyncCoreResult`. Keep
 transport-generated protobuf types private. `TaskBatch` owns ordered tasks and

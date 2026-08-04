@@ -12,8 +12,8 @@ ordered heights:
 
 - `HeightLoader` loads the latest available height from an upstream source.
 - `SyncHandler` processes bounded inclusive ranges.
-- `SyncProgressStore` persists committed progress and owns the configured initial
-  height fallback.
+- `SyncProgressStore` persists committed progress and the application-provided
+  initial height.
 - `ProgressProvider` supplies progress subscriptions that connect height
   providers and synchronizers into a dependency graph.
 - `SyncCallback` observes lifecycle events.
@@ -83,14 +83,15 @@ to `f64` and may lose unit precision above `2^53`; this does not narrow the
 engine height domain. The optional ScyllaDB store is narrower because its CQL
 `bigint` column supports heights only through `i64::MAX`.
 
-`ScyllaProgressStore::builder` requires the initial-height fallback. Configure
-either a prebuilt `ScyllaClient` or both endpoints and an existing keyspace;
-the latter uses the client's defaults. Building applies the idempotent table
-migration and calls `use_keyspace`, so initialize `stonfi_metrics` first. The
-table defaults to `sync_progress`; custom names must remain unquoted CQL
-identifiers. The migration creates no keyspace and performs no legacy backfill.
-Client requests have bounded internal retries, while the synchronizer owns the
-outer retry loop. Do not add another retry or lock inside the store.
+`ScyllaProgressStore::builder` configures either a prebuilt `ScyllaClient` or
+both endpoints and an existing keyspace; the latter uses the client's defaults.
+Building applies the idempotent table migration and calls `use_keyspace`, so
+initialize `stonfi_metrics` first. The table defaults to `sync_progress`; custom
+names must remain unquoted CQL identifiers. The migration creates no keyspace,
+performs no legacy backfill, and does not initialize `INITIAL_HEIGHT`.
+Applications call `SyncProgressStore::save_initial_height` before running the
+engine. Client requests have bounded internal retries, while the synchronizer
+owns the outer retry loop. Do not add another retry or lock inside the store.
 
 ## Invariants and pitfalls
 
@@ -98,17 +99,20 @@ outer retry loop. Do not add another retry or lock inside the store.
   engine.
 - Dependency graphs must be acyclic. The builder subscribes to providers but
   does not perform graph discovery or cycle detection.
-- `INITIAL_HEIGHT` (`"INITIAL_HEIGHT"`) is the reserved initial-height key in
+- `INITIAL_HEIGHT` (`"INITIAL"`) is the reserved initial-height key in
   the handler-ID namespace. Progress stores receive it through their `handler_id`
   arguments, but it must never identify a height provider, synchronizer, or
   dependency-graph entity.
 - Only one active engine may write a given handler ID. The progress-store API is
   not compare-and-set storage; this also applies to `INITIAL_HEIGHT`.
-- `SyncProgressStore::load_synced_or_initial` prefers per-handler state, then the
-  persisted `INITIAL_HEIGHT` state, and only then stores and returns the
-  configured fallback.
+- `SyncProgressStore::save_initial_height` and `load_initial_height` persist and
+  load the reserved `INITIAL_HEIGHT` row through the handler-keyed operations.
+- `SyncProgressStore::load_synced_or_initial` prefers per-handler state, then
+  the persisted `INITIAL_HEIGHT` state, and returns an error when neither exists.
+- Applications must persist `INITIAL_HEIGHT` before running the engine; the
+  engine never chooses or initializes it.
 - `SyncProgressStore::load_initial_height` reads the persisted `INITIAL_HEIGHT`
-  state without applying or storing the configured fallback.
+  state without applying another fallback.
 - `SyncHeight` is `u64`; height `0` remains the initial no-progress sentinel.
 - `ScyllaProgressStore` rejects heights above `i64::MAX` and negative values read
   from its CQL `bigint` column.

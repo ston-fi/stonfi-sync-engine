@@ -1,6 +1,5 @@
 use super::{ScyllaProgressStore, map_scylla_error};
 use crate::errors::{SyncCoreError, SyncCoreResult};
-use crate::sync_engine::SyncHeight;
 use stonfi_scylla_client::client::ScyllaClient;
 use stonfi_scylla_client::simple_migrator::SimpleMigrator;
 
@@ -17,7 +16,6 @@ const CREATE_TABLE_MIGRATION: &str = "CREATE TABLE IF NOT EXISTS [[KEYSPACE_NAME
 /// uses the defaults provided by [`ScyllaClient::builder`].
 #[must_use]
 pub struct Builder {
-    initial_height: SyncHeight,
     client: Option<ScyllaClient>,
     endpoints: Option<String>,
     keyspace: Option<String>,
@@ -25,9 +23,8 @@ pub struct Builder {
 }
 
 impl Builder {
-    pub(super) fn new(initial_height: SyncHeight) -> Self {
+    pub(super) fn new() -> Self {
         Self {
-            initial_height,
             client: None,
             endpoints: None,
             keyspace: None,
@@ -81,7 +78,6 @@ impl Builder {
         client.use_keyspace().await.map_err(map_scylla_error)?;
         Ok(ScyllaProgressStore {
             client,
-            initial_height: self.initial_height,
             load_query: format!("SELECT height FROM {} WHERE handler_id = ?", self.table_name),
             save_query: format!("INSERT INTO {} (handler_id, height) VALUES (?, ?)", self.table_name),
         })
@@ -130,9 +126,9 @@ mod tests {
     #[tokio::test]
     async fn test_build_rejects_missing_or_incomplete_connection_mode() {
         for builder in [
-            Builder::new(0),
-            Builder::new(0).with_endpoints("127.0.0.1:9042"),
-            Builder::new(0).with_keyspace("sync"),
+            Builder::new(),
+            Builder::new().with_endpoints("127.0.0.1:9042"),
+            Builder::new().with_keyspace("sync"),
         ] {
             assert!(matches!(builder.build().await, Err(SyncCoreError::InvalidArgs(_))));
         }

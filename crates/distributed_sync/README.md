@@ -79,8 +79,8 @@ directly to `stonfi_sync_core::SyncEngine`'s builder. Convert it into a
 separately constructed handlers with workers; handler state is local to each
 process. On shutdown, stop the core engine before the worker and server. See
 [`examples/distributed.rs`](examples/distributed.rs) for the complete workflow.
-Initial-height configuration belongs to the core `SyncProgressStore`; distributed
-handlers define task behavior only.
+Applications initialize the core `SyncProgressStore` before running the engine;
+distributed handlers define task behavior only.
 
 `DistributedHandler::sync_timeout()` covers task creation, dispatch, worker
 capacity, processing, and result handling through the core Tokio timeout.

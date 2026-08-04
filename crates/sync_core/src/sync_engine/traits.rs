@@ -1,4 +1,4 @@
-use crate::errors::SyncCoreResult;
+use crate::errors::{SyncCoreError, SyncCoreResult};
 use crate::sync_engine::SyncHeight;
 use crate::sync_engine::progress::ProgressReceiver;
 use std::time::Duration;
@@ -51,18 +51,25 @@ pub trait SyncHandler: Send + 'static {
     fn allow_rewind(&self) -> bool { false }
 }
 
-/// Persists handler progress and owns the initial-height fallback.
+/// Persists handler progress and the application-provided initial height.
 ///
-/// Only one engine may write each handler ID or [`INITIAL_HEIGHT`] key.
+/// Only one writer may update each handler ID or [`INITIAL_HEIGHT`] key; this
+/// trait does not coordinate concurrent writers.
 #[rustfmt::skip]
 #[async_trait::async_trait]
 pub trait SyncProgressStore: Send + Sync + 'static {
-    /// Returns the fallback stored under [`INITIAL_HEIGHT`].
-    fn initial_synced_height(&self) -> SyncHeight;
     /// Stores the latest synced height for `handler_id`.
     async fn save_synced_height(&self, handler_id: &str, sync_height: SyncHeight) -> SyncCoreResult<()>;
     /// Loads the persisted height for `handler_id`.
     async fn load_synced_height(&self, handler_id: &str) -> SyncCoreResult<Option<SyncHeight>>;
+    /// Stores the application-provided [`INITIAL_HEIGHT`] value.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when storage access fails.
+    async fn save_initial_height(&self, initial_height: SyncHeight) -> SyncCoreResult<()> {
+        self.save_synced_height(INITIAL_HEIGHT, initial_height).await
+    }
     /// Loads the persisted [`INITIAL_HEIGHT`] value.
     ///
     /// # Errors
@@ -71,14 +78,13 @@ pub trait SyncProgressStore: Send + Sync + 'static {
     async fn load_initial_height(&self) -> SyncCoreResult<Option<SyncHeight>> {
         self.load_synced_height(INITIAL_HEIGHT).await
     }
-    /// Loads `handler_id`, falling back to [`INITIAL_HEIGHT`].
-    ///
-    /// Initializes [`INITIAL_HEIGHT`] from [`Self::initial_synced_height`] when
-    /// neither key exists.
+    /// Loads `handler_id`, falling back to the persisted [`INITIAL_HEIGHT`].
     ///
     /// # Errors
     ///
-    /// Returns an error when storage access fails.
+    /// Returns an error when storage access fails. Returns
+    /// [`SyncCoreError::Logic`] when the application has not initialized
+    /// [`INITIAL_HEIGHT`].
     async fn load_synced_or_initial(&self, handler_id: &str) -> SyncCoreResult<SyncHeight> {
         if let Some(sync_height) = self.load_synced_height(handler_id).await? {
             return Ok(sync_height);
@@ -87,9 +93,9 @@ pub trait SyncProgressStore: Send + Sync + 'static {
             return Ok(initial_height);
         }
 
-        let initial_height = self.initial_synced_height();
-        self.save_synced_height(INITIAL_HEIGHT, initial_height).await?;
-        Ok(initial_height)
+        Err(SyncCoreError::logic(format!(
+            "initial height is not initialized; call SyncProgressStore::save_initial_height before loading {handler_id:?}"
+        )))
     }
 }
 

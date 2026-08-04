@@ -45,7 +45,7 @@ fn main() -> SyncCoreResult<()> {
     let coordinator = Coordinator::new();
     let _server = TaskServer::builder(coordinator);
     let _worker = Worker::builder("http://127.0.0.1:50051");
-    let _scylla_store = ScyllaProgressStore::builder(0)
+    let _scylla_store = ScyllaProgressStore::builder()
         .with_endpoints("127.0.0.1:9042")
         .with_keyspace("sync")
         .with_table_name("sync_progress");

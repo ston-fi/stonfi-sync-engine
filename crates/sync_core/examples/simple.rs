@@ -97,9 +97,8 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt().with_env_filter(filter).init();
     stonfi_metrics::init_metrics!()?;
 
-    // `MemProgressStore` keeps synced heights in memory. The constructor's `0`
-    // configures the engine-wide fallback that is stored under `INITIAL` when
-    // the first synchronizer starts without persisted progress.
+    // `MemProgressStore` keeps synced heights in memory. The constructor stores
+    // `0` under the reserved `INITIAL` key before the engine starts.
     let progress_store = Arc::new(MemProgressStore::new(0));
 
     let height_provider = HeightProvider::new(ExampleHeightLoader {

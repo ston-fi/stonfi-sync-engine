@@ -1,10 +1,9 @@
 use super::*;
-use crate::errors::{SyncCoreError, SyncCoreResult};
+use crate::errors::SyncCoreResult;
 use crate::sync_engine::traits::{HeightLoader, ProgressProvider, SyncHandler};
 use parking_lot::RwLock;
 use std::cell::Cell;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 static TRACING_INIT: std::sync::Once = std::sync::Once::new();
@@ -76,41 +75,20 @@ impl SyncHandler for TestSync {
 }
 
 pub(super) struct TestProgressStore {
-    initial_height: SyncHeight,
-    pub(super) initial_save_failures: AtomicUsize,
     pub(super) storage: RwLock<HashMap<String, Vec<SyncHeight>>>,
 }
 
 impl TestProgressStore {
     pub fn new(initial_height: SyncHeight) -> Self {
         Self {
-            initial_height,
-            initial_save_failures: AtomicUsize::new(0),
-            storage: RwLock::new(HashMap::new()),
+            storage: RwLock::new(HashMap::from([(INITIAL_HEIGHT.to_owned(), vec![initial_height])])),
         }
-    }
-
-    pub(super) fn with_initial_save_failures(mut self, failures: usize) -> Self {
-        self.initial_save_failures = AtomicUsize::new(failures);
-        self
     }
 }
 
 #[async_trait::async_trait]
 impl SyncProgressStore for TestProgressStore {
-    fn initial_synced_height(&self) -> SyncHeight {
-        self.initial_height
-    }
-
     async fn save_synced_height(&self, handler_id: &str, sync_height: SyncHeight) -> SyncCoreResult<()> {
-        if handler_id == INITIAL_HEIGHT
-            && self
-                .initial_save_failures
-                .try_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| remaining.checked_sub(1))
-                .is_ok()
-        {
-            return Err(SyncCoreError::custom("configured initial save failure"));
-        }
         self.storage.write().entry(handler_id.to_owned()).or_default().push(sync_height);
         Ok(())
     }

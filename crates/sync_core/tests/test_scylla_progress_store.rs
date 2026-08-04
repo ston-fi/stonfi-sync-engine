@@ -4,7 +4,7 @@ use stonfi_scylla_client::client::ScyllaClient;
 use stonfi_scylla_client::simple_migrator::SimpleMigrator;
 use stonfi_sync_core::errors::SyncCoreError;
 use stonfi_sync_core::scylla_progress_store::ScyllaProgressStore;
-use stonfi_sync_core::sync_engine::{INITIAL_HEIGHT, SyncProgressStore};
+use stonfi_sync_core::sync_engine::SyncProgressStore;
 use testcontainers::core::{IntoContainerPort, WaitFor};
 use testcontainers::runners::AsyncRunner;
 use testcontainers::{GenericImage, ImageExt};
@@ -57,14 +57,15 @@ async fn test_scylla_progress_store_end_to_end() -> anyhow::Result<()> {
         .apply_all(&[CREATE_KEYSPACE.to_owned()])
         .await?;
 
-    let store = ScyllaProgressStore::builder(7)
+    let store = ScyllaProgressStore::builder()
         .with_endpoints(&endpoints)
         .with_keyspace(&keyspace)
         .build()
         .await?;
+    store.save_initial_height(7).await?;
     assert_eq!(None, store.load_synced_height("missing").await?);
     assert_eq!(7, store.load_synced_or_initial("handler").await?);
-    assert_eq!(Some(7), store.load_synced_height(INITIAL_HEIGHT).await?);
+    assert_eq!(Some(7), store.load_initial_height().await?);
 
     store.save_synced_height("handler", 11).await?;
     store.save_synced_height("handler", 12).await?;
@@ -78,14 +79,14 @@ async fn test_scylla_progress_store_end_to_end() -> anyhow::Result<()> {
         Err(SyncCoreError::InvalidArgs(_))
     ));
 
-    let reopened = ScyllaProgressStore::builder(0)
+    let reopened = ScyllaProgressStore::builder()
         .with_endpoints(&endpoints)
         .with_keyspace(&keyspace)
         .build()
         .await?;
     assert_eq!(Some(12), reopened.load_synced_height("handler").await?);
 
-    let custom_store = ScyllaProgressStore::builder(3)
+    let custom_store = ScyllaProgressStore::builder()
         .with_scylla_client(client.clone())
         .with_table_name("custom_sync_progress")
         .build()
@@ -105,7 +106,7 @@ async fn test_scylla_progress_store_end_to_end() -> anyhow::Result<()> {
         Err(SyncCoreError::System(message)) if message.contains("negative height -1")
     ));
 
-    let conflicting = ScyllaProgressStore::builder(0)
+    let conflicting = ScyllaProgressStore::builder()
         .with_scylla_client(client)
         .with_endpoints(&endpoints)
         .with_keyspace(&keyspace)

@@ -24,24 +24,19 @@ pub mod builder;
 /// This store does not provide compare-and-set or multi-writer coordination.
 pub struct ScyllaProgressStore {
     client: ScyllaClient,
-    initial_height: SyncHeight,
     load_query: String,
     save_query: String,
 }
 
 impl ScyllaProgressStore {
-    /// Starts configuring a store with the required initial-height fallback.
-    pub fn builder(initial_height: SyncHeight) -> builder::Builder {
-        builder::Builder::new(initial_height)
+    /// Starts configuring a store.
+    pub fn builder() -> builder::Builder {
+        builder::Builder::new()
     }
 }
 
 #[async_trait::async_trait]
 impl SyncProgressStore for ScyllaProgressStore {
-    fn initial_synced_height(&self) -> SyncHeight {
-        self.initial_height
-    }
-
     async fn save_synced_height(&self, handler_id: &str, sync_height: SyncHeight) -> SyncCoreResult<()> {
         let height = i64::try_from(sync_height).map_err(|_| {
             SyncCoreError::invalid_args(format!(

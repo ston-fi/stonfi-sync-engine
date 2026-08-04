@@ -94,25 +94,27 @@ where
 
 ## Initial progress
 
-`SyncProgressStore` owns the engine-wide initial synced height. Construct the
-store with the fallback selected by application configuration; for example,
-`MemProgressStore::new(0)` uses the no-progress sentinel. When a synchronizer
-starts, [`SyncProgressStore::load_synced_or_initial`] resolves state in this
-order:
+Applications must initialize the engine-wide initial synced height before
+running an engine. Call [`SyncProgressStore::save_initial_height`] on durable
+stores; `MemProgressStore::new(0)` stores the no-progress sentinel eagerly.
+When a synchronizer starts, [`SyncProgressStore::load_synced_or_initial`]
+resolves state in this order:
 
 1. the synchronizer handler's own persisted ID;
-2. the persisted [`INITIAL_HEIGHT`] value; or
-3. the store's configured fallback, saved under `INITIAL_HEIGHT` before it is
-   returned.
+2. the persisted [`INITIAL_HEIGHT`] value.
+
+Loading fails if neither value exists. The engine never chooses or persists an
+initial height on the application's behalf.
 
 `INITIAL_HEIGHT` is the reserved initial-height key in the handler-ID namespace.
 Progress stores receive it through their `handler_id` arguments, but it cannot be
 registered as a height loader or sync handler and never participates in the
 dependency graph.
-Consumers can read its persisted value directly with
-[`SyncProgressStore::load_initial_height`].
-Only one active engine may initialize or write it because progress stores do not
-provide compare-and-set coordination.
+Consumers can update or read its persisted value directly with
+[`SyncProgressStore::save_initial_height`] and
+[`SyncProgressStore::load_initial_height`]. Only one application instance may
+initialize or write it because progress stores do not provide compare-and-set
+coordination.
 
 ## ScyllaDB progress storage
 
@@ -125,12 +127,14 @@ perform instrumented database operations. Configure either an existing client:
 #     client: stonfi_scylla_client::client::ScyllaClient,
 # ) -> stonfi_sync_core::errors::SyncCoreResult<()> {
 use stonfi_sync_core::scylla_progress_store::ScyllaProgressStore;
+use stonfi_sync_core::sync_engine::SyncProgressStore;
 
-let store = ScyllaProgressStore::builder(0)
+let store = ScyllaProgressStore::builder()
     .with_scylla_client(client)
     .with_table_name("service_sync_progress")
     .build()
     .await?;
+store.save_initial_height(0).await?;
 # let _ = store;
 # Ok(())
 # }
@@ -141,12 +145,14 @@ or let the builder create one with `stonfi_scylla_client`'s defaults:
 ```rust,ignore
 # async fn create() -> stonfi_sync_core::errors::SyncCoreResult<()> {
 use stonfi_sync_core::scylla_progress_store::ScyllaProgressStore;
+use stonfi_sync_core::sync_engine::SyncProgressStore;
 
-let store = ScyllaProgressStore::builder(0)
+let store = ScyllaProgressStore::builder()
     .with_endpoints("127.0.0.1:9042")
     .with_keyspace("my_service")
     .build()
     .await?;
+store.save_initial_height(0).await?;
 # let _ = store;
 # Ok(())
 # }
@@ -228,10 +234,10 @@ implementations can update their own fields without internal locking. Progress
 stores and callbacks are shared between tasks and therefore remain
 `Send + Sync + 'static`.
 
-Store implementations provide [`SyncProgressStore::initial_synced_height`] from
-constructor or application configuration. The trait's default
-`load_synced_or_initial` implementation owns the durable fallback algorithm;
-handlers only process ranges.
+Store implementations provide only handler-keyed save and load operations. The
+trait pre-implements initial-height save/load helpers and handler-to-initial
+fallback. Applications choose and persist the initial height before starting an
+engine; handlers only process ranges.
 
 ## Metrics
 
@@ -299,7 +305,7 @@ cargo publish --dry-run -p stonfi_sync_core
 [`INITIAL_HEIGHT`]: crate::sync_engine::INITIAL_HEIGHT
 [`HeightLoader`]: crate::sync_engine::HeightLoader
 [`SyncProgressStore`]: crate::sync_engine::SyncProgressStore
-[`SyncProgressStore::initial_synced_height`]: crate::sync_engine::SyncProgressStore::initial_synced_height
+[`SyncProgressStore::save_initial_height`]: crate::sync_engine::SyncProgressStore::save_initial_height
 [`SyncProgressStore::load_initial_height`]: crate::sync_engine::SyncProgressStore::load_initial_height
 [`SyncProgressStore::load_synced_or_initial`]: crate::sync_engine::SyncProgressStore::load_synced_or_initial
 [`ProgressProvider`]: crate::sync_engine::ProgressProvider

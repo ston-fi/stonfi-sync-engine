@@ -1,20 +1,18 @@
 use crate::errors::SyncCoreResult;
-use crate::sync_engine::{SyncHeight, SyncProgressStore};
+use crate::sync_engine::{INITIAL_HEIGHT, SyncHeight, SyncProgressStore};
 use parking_lot::RwLock;
 use std::collections::HashMap;
 
 /// In-memory [`SyncProgressStore`] implementation for tests and ephemeral runs.
 pub struct MemProgressStore {
-    initial_height: SyncHeight,
     storage: RwLock<HashMap<String, SyncHeight>>,
 }
 
 impl MemProgressStore {
-    /// Creates an empty in-memory progress store with the configured initial height.
+    /// Creates an in-memory progress store with the supplied initial height.
     pub fn new(initial_height: SyncHeight) -> Self {
         Self {
-            initial_height,
-            storage: RwLock::new(HashMap::new()),
+            storage: RwLock::new(HashMap::from([(INITIAL_HEIGHT.to_owned(), initial_height)])),
         }
     }
 }
@@ -27,10 +25,6 @@ impl Default for MemProgressStore {
 
 #[async_trait::async_trait]
 impl SyncProgressStore for MemProgressStore {
-    fn initial_synced_height(&self) -> SyncHeight {
-        self.initial_height
-    }
-
     async fn save_synced_height(&self, handler_id: &str, sync_height: SyncHeight) -> SyncCoreResult<()> {
         self.storage.write().insert(handler_id.to_owned(), sync_height);
         Ok(())

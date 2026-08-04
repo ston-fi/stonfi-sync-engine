@@ -754,7 +754,7 @@ async fn test_on_sync_complete_callback_failure_does_not_rerun_sync_range() -> a
 }
 
 #[tokio::test]
-async fn test_missing_persisted_height_uses_and_stores_configured_initial_height() -> anyhow::Result<()> {
+async fn test_missing_handler_progress_uses_preinitialized_height() -> anyhow::Result<()> {
     init_test_runtime()?;
     let height_provider: HeightProvider = TestHeightLoader::new("test_init_initial_height", 2).into();
     let progress_store = Arc::new(TestProgressStore::new(7));
@@ -777,9 +777,9 @@ async fn test_missing_persisted_height_uses_and_stores_configured_initial_height
 }
 
 #[tokio::test]
-async fn test_persisted_sync_and_initial_heights_take_precedence_over_config() -> anyhow::Result<()> {
+async fn test_persisted_sync_height_takes_precedence_over_initial_height() -> anyhow::Result<()> {
     let progress_store = TestProgressStore::new(99);
-    progress_store.save_synced_height(INITIAL_HEIGHT, 7).await?;
+    progress_store.save_initial_height(7).await?;
 
     assert_eq!(7, progress_store.load_synced_or_initial("missing_sync").await?);
 
@@ -789,20 +789,13 @@ async fn test_persisted_sync_and_initial_heights_take_precedence_over_config() -
 }
 
 #[tokio::test]
-async fn test_initial_height_save_failure_is_retried() -> anyhow::Result<()> {
-    init_test_runtime()?;
-    let height_provider: HeightProvider = TestHeightLoader::new("initial_save_retry_progress", 2).into();
-    let progress_store = Arc::new(TestProgressStore::new(3).with_initial_save_failures(1));
-    let sync: Synchronizer = TestSync::new("initial_save_retry_sync", 0).into();
+async fn test_missing_initial_height_is_an_error() -> anyhow::Result<()> {
+    let progress_store = TestProgressStore::new(0);
+    progress_store.storage.write().clear();
 
-    let engine = SyncEngine::builder(progress_store.clone())
-        .add_synchronizer(sync, &[&height_provider])?
-        .add_height_provider(height_provider)?
-        .build();
-    shutdown_engine_after(engine.run(), Duration::from_millis(500)).await?;
-
-    assert_eq!(0, progress_store.initial_save_failures.load(Ordering::SeqCst));
-    assert_eq!(Some(3), progress_store.load_synced_height(INITIAL_HEIGHT).await?);
-    assert!(progress_store.load_synced_height("initial_save_retry_sync").await?.is_some());
+    assert!(matches!(
+        progress_store.load_synced_or_initial("missing_sync").await,
+        Err(SyncCoreError::Logic(message)) if message.contains("save_initial_height")
+    ));
     Ok(())
 }
