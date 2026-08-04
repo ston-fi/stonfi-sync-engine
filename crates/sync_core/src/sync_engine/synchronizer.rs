@@ -2,7 +2,7 @@ use crate::sync_engine::callbacks::CallbackStore;
 use crate::sync_engine::metrics::{SyncEngineMetrics, SyncPhase};
 use crate::sync_engine::progress::{MultiReceiver, ProgressReceiver, ProgressSender};
 use crate::sync_engine::traits::ProgressProvider;
-use crate::sync_engine::{SyncHandler, SyncHeight, SyncStatusStore, sleep_or_cancelled};
+use crate::sync_engine::{SyncHandler, SyncHeight, SyncProgressStore, sleep_or_cancelled};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio_util::sync::CancellationToken;
@@ -12,7 +12,7 @@ const SLEEP_IF_DISABLED: Duration = Duration::from_secs(1);
 pub(super) struct SyncCtx {
     pub receiver: MultiReceiver,
     pub cancellation: CancellationToken,
-    pub status_store: Arc<dyn SyncStatusStore>,
+    pub progress_store: Arc<dyn SyncProgressStore>,
     pub callbacks: Arc<CallbackStore>,
     pub log_progress: fn(SyncHeight, SyncHeight) -> bool,
 }
@@ -236,7 +236,7 @@ impl Synchronizer {
             if ctx.cancellation.is_cancelled() {
                 return None;
             }
-            match ctx.status_store.load_synced_or_initial(id).await {
+            match ctx.progress_store.load_synced_or_initial(id).await {
                 Ok(height) => return Some(height),
                 Err(err) => {
                     tracing::warn!("[{log_prefix}] .load_synced_or_initial() returns error: {err}. Retrying...");
@@ -254,7 +254,7 @@ impl Synchronizer {
             if ctx.cancellation.is_cancelled() {
                 return false;
             }
-            if let Err(err) = ctx.status_store.save_synced_height(id, height).await {
+            if let Err(err) = ctx.progress_store.save_synced_height(id, height).await {
                 tracing::warn!("[{log_prefix}] .save_synced_height({height}) returns error: {err}. Retrying...");
                 SyncEngineMetrics::inc_retries(id, SyncPhase::SaveHeight);
                 if sleep_or_cancelled(&ctx.cancellation, self.handler.retry_delay()).await {

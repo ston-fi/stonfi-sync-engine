@@ -27,7 +27,7 @@ jobs:
       - run: rustup toolchain install nightly --component rustfmt
       - run: cargo test --workspace --all-features --locked
       - run: cargo test --workspace --doc --locked
-      - run: cargo test --workspace --examples --locked
+      - run: cargo test --workspace --examples --all-features --locked
       - run: cargo +nightly fmt --check
       - run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
       - run: RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc --workspace --no-deps --all-features --locked
@@ -42,6 +42,15 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - uses: dtolnay/rust-toolchain@1.95.0
       - run: cargo check --workspace --all-features --locked
+
+  scylla-integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@stable
+      - run: docker info
+      - run: cargo test -p stonfi_sync_core --features scylla --test scylla_progress_store --locked -- --ignored --test-threads=1
 
   external-consumer:
     runs-on: ubuntu-latest

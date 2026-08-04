@@ -21,7 +21,7 @@ pub enum SyncCoreError {
     /// A network operation failed.
     #[error("NetError: {0}")]
     NetError(String),
-    /// An error from a consumer-provided implementation.
+    /// An error from an external dependency or consumer-provided implementation.
     #[error("External: {0}")]
     External(#[source] Arc<dyn Error + Send + Sync + 'static>),
     /// A consumer-defined error without a more specific classification.

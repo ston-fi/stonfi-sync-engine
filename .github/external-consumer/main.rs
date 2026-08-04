@@ -4,7 +4,8 @@ use stonfi_distributed_sync::coordinator::Coordinator;
 use stonfi_distributed_sync::task_server::TaskServer;
 use stonfi_distributed_sync::worker::Worker;
 use stonfi_sync_core::errors::SyncCoreResult;
-use stonfi_sync_core::mem_status_store::MemStatusStore;
+use stonfi_sync_core::mem_progress_store::MemProgressStore;
+use stonfi_sync_core::scylla_progress_store::ScyllaProgressStore;
 use stonfi_sync_core::sync_engine::{HeightLoader, HeightProvider, SyncEngine, SyncHandler, SyncHeight};
 
 struct Source;
@@ -35,7 +36,7 @@ impl SyncHandler for Handler {
 
 fn main() -> SyncCoreResult<()> {
     let source = HeightProvider::new(Source);
-    let _engine = SyncEngine::builder(Arc::new(MemStatusStore::new(0)))
+    let _engine = SyncEngine::builder(Arc::new(MemProgressStore::new(0)))
         .with_shutdown_timeout(Duration::from_secs(1))
         .add_synchronizer(Handler, &[&source])?
         .add_height_provider(source)?
@@ -44,5 +45,9 @@ fn main() -> SyncCoreResult<()> {
     let coordinator = Coordinator::new();
     let _server = TaskServer::builder(coordinator);
     let _worker = Worker::builder("http://127.0.0.1:50051");
+    let _scylla_store = ScyllaProgressStore::builder(0)
+        .with_endpoints("127.0.0.1:9042")
+        .with_keyspace("sync")
+        .with_table_name("sync_progress");
     Ok(())
 }

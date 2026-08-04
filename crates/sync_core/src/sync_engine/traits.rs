@@ -56,7 +56,7 @@ pub trait SyncHandler: Send + 'static {
 /// Only one engine may write each handler ID or [`INITIAL_HEIGHT`] key.
 #[rustfmt::skip]
 #[async_trait::async_trait]
-pub trait SyncStatusStore: Send + Sync + 'static {
+pub trait SyncProgressStore: Send + Sync + 'static {
     /// Returns the fallback stored under [`INITIAL_HEIGHT`].
     fn initial_synced_height(&self) -> SyncHeight;
     /// Stores the latest synced height for `handler_id`.
@@ -75,13 +75,13 @@ pub trait SyncStatusStore: Send + Sync + 'static {
         if let Some(sync_height) = self.load_synced_height(handler_id).await? {
             return Ok(sync_height);
         }
-        if let Some(initial_synced_height) = self.load_synced_height(INITIAL_HEIGHT).await? {
-            return Ok(initial_synced_height);
+        if let Some(initial_height) = self.load_synced_height(INITIAL_HEIGHT).await? {
+            return Ok(initial_height);
         }
 
-        let initial_synced_height = self.initial_synced_height();
-        self.save_synced_height(INITIAL_HEIGHT, initial_synced_height).await?;
-        Ok(initial_synced_height)
+        let initial_height = self.initial_synced_height();
+        self.save_synced_height(INITIAL_HEIGHT, initial_height).await?;
+        Ok(initial_height)
     }
 }
 

@@ -79,7 +79,7 @@ directly to `stonfi_sync_core::SyncEngine`'s builder. Convert it into a
 separately constructed handlers with workers; handler state is local to each
 process. On shutdown, stop the core engine before the worker and server. See
 [`examples/distributed.rs`](examples/distributed.rs) for the complete workflow.
-Initial-height configuration belongs to the core `SyncStatusStore`; distributed
+Initial-height configuration belongs to the core `SyncProgressStore`; distributed
 handlers define task behavior only.
 
 `DistributedHandler::sync_timeout()` covers task creation, dispatch, worker
@@ -145,7 +145,7 @@ startup initialization panics by design. Worker IDs are not metric labels.
 - Coordinator and worker hosts must keep their system clocks synchronized. Task
   assignments carry the coordinator's absolute Unix deadline, which workers
   compare directly with their local clocks.
-- The crate does not provide distributed locking or multi-writer status
+- The crate does not provide distributed locking or multi-writer progress
   coordination. The `stonfi_sync_core` single-writer rule still applies.
 - Task payload compatibility is owned by each handler's
   [`TaskPayload`](crate::traits::TaskPayload) implementation.

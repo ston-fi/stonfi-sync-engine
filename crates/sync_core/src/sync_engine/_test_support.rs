@@ -75,16 +75,16 @@ impl SyncHandler for TestSync {
     }
 }
 
-pub(super) struct TestStatusStore {
-    initial_synced_height: SyncHeight,
+pub(super) struct TestProgressStore {
+    initial_height: SyncHeight,
     pub(super) initial_save_failures: AtomicUsize,
     pub(super) storage: RwLock<HashMap<String, Vec<SyncHeight>>>,
 }
 
-impl TestStatusStore {
-    pub fn new(initial_synced_height: SyncHeight) -> Self {
+impl TestProgressStore {
+    pub fn new(initial_height: SyncHeight) -> Self {
         Self {
-            initial_synced_height,
+            initial_height,
             initial_save_failures: AtomicUsize::new(0),
             storage: RwLock::new(HashMap::new()),
         }
@@ -97,9 +97,9 @@ impl TestStatusStore {
 }
 
 #[async_trait::async_trait]
-impl SyncStatusStore for TestStatusStore {
+impl SyncProgressStore for TestProgressStore {
     fn initial_synced_height(&self) -> SyncHeight {
-        self.initial_synced_height
+        self.initial_height
     }
 
     async fn save_synced_height(&self, handler_id: &str, sync_height: SyncHeight) -> SyncCoreResult<()> {

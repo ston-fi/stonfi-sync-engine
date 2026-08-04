@@ -2,7 +2,7 @@
 
 `stonfi_sync_core` is a small asynchronous engine for synchronizing ordered
 heights through a dependency graph. Height providers discover upstream progress,
-synchronizers process inclusive ranges, and status stores persist committed
+synchronizers process inclusive ranges, and progress stores persist committed
 heights.
 
 It is the transport-independent package in the `stonfi-sync-engine` workspace
@@ -38,8 +38,18 @@ stonfi_metrics = "0.1"
 stonfi_sync_core = "0.1"
 ```
 
+To use the built-in ScyllaDB progress store, enable its non-default feature and
+depend directly on the client only when constructing a customized client:
+
+```toml
+[dependencies]
+stonfi_metrics = "0.1"
+stonfi_scylla_client = "0.2"
+stonfi_sync_core = { version = "0.1", features = ["scylla"] }
+```
+
 The crate requires a Tokio runtime. Implement [`HeightLoader`] for each source,
-[`SyncHandler`] for each range handler, and [`SyncStatusStore`] for durable
+[`SyncHandler`] for each range handler, and [`SyncProgressStore`] for durable
 progress. Register implementations directly when they are leaves in the
 dependency graph. Wrap them with [`HeightProvider`] or [`Synchronizer`] first
 when their progress must be passed to a dependent handler, connect the graph
@@ -59,11 +69,11 @@ use std::future::Future;
 use std::sync::Arc;
 use stonfi_sync_core::{
     errors::SyncCoreResult,
-    sync_engine::{HeightProvider, SyncEngine, SyncStatusStore, Synchronizer},
+    sync_engine::{HeightProvider, SyncEngine, SyncProgressStore, Synchronizer},
 };
 
 async fn run_until<F>(
-    status_store: Arc<dyn SyncStatusStore>,
+    progress_store: Arc<dyn SyncProgressStore>,
     source: HeightProvider,
     synchronizer: Synchronizer,
     shutdown: F,
@@ -71,7 +81,7 @@ async fn run_until<F>(
 where
     F: Future<Output = ()>,
 {
-    let engine = SyncEngine::builder(status_store)
+    let engine = SyncEngine::builder(progress_store)
         .add_synchronizer(synchronizer, &[&source])?
         .add_height_provider(source)?
         .build();
@@ -82,12 +92,12 @@ where
 }
 ```
 
-## Initial status
+## Initial progress
 
-`SyncStatusStore` owns the engine-wide initial synced height. Construct the
+`SyncProgressStore` owns the engine-wide initial synced height. Construct the
 store with the fallback selected by application configuration; for example,
-`MemStatusStore::new(0)` uses the no-progress sentinel. When a synchronizer
-starts, [`SyncStatusStore::load_synced_or_initial`] resolves state in this
+`MemProgressStore::new(0)` uses the no-progress sentinel. When a synchronizer
+starts, [`SyncProgressStore::load_synced_or_initial`] resolves state in this
 order:
 
 1. the synchronizer handler's own persisted ID;
@@ -96,11 +106,63 @@ order:
    returned.
 
 `INITIAL_HEIGHT` is the reserved initial-height key in the handler-ID namespace.
-Status stores receive it through their `handler_id` arguments, but it cannot be
+Progress stores receive it through their `handler_id` arguments, but it cannot be
 registered as a height loader or sync handler and never participates in the
 dependency graph.
-Only one active engine may initialize or write it because status stores do not
+Only one active engine may initialize or write it because progress stores do not
 provide compare-and-set coordination.
+
+## ScyllaDB progress storage
+
+The `scylla` feature exposes [`ScyllaProgressStore`]. Initialize
+`stonfi_metrics` before building it because migrations and client construction
+perform instrumented database operations. Configure either an existing client:
+
+```rust,ignore
+# async fn create(
+#     client: stonfi_scylla_client::client::ScyllaClient,
+# ) -> stonfi_sync_core::errors::SyncCoreResult<()> {
+use stonfi_sync_core::scylla_progress_store::ScyllaProgressStore;
+
+let store = ScyllaProgressStore::builder(0)
+    .with_scylla_client(client)
+    .with_table_name("service_sync_progress")
+    .build()
+    .await?;
+# let _ = store;
+# Ok(())
+# }
+```
+
+or let the builder create one with `stonfi_scylla_client`'s defaults:
+
+```rust,ignore
+# async fn create() -> stonfi_sync_core::errors::SyncCoreResult<()> {
+use stonfi_sync_core::scylla_progress_store::ScyllaProgressStore;
+
+let store = ScyllaProgressStore::builder(0)
+    .with_endpoints("127.0.0.1:9042")
+    .with_keyspace("my_service")
+    .build()
+    .await?;
+# let _ = store;
+# Ok(())
+# }
+```
+
+These modes are exclusive. Endpoints and keyspace must be configured together.
+The keyspace must already exist. Each build replays an idempotent migration that
+creates only the configured table, `sync_progress` by default, with
+`handler_id text PRIMARY KEY` and `height bigint`; it does not backfill legacy
+Tongrid state. Custom table names must be unquoted CQL identifiers.
+
+Handler IDs, including `INITIAL_HEIGHT`, are stored unchanged. CQL `bigint` is
+signed, so this implementation accepts heights only through `i64::MAX` even
+though the engine's `SyncHeight` is `u64`. Larger writes are rejected and
+negative database values are reported as corrupt storage. The store adds no
+locking, compare-and-set behavior, or retry loop: one engine must own each
+handler ID, the client performs bounded request retries, and the engine retries
+progress operations according to the handler policy.
 
 ## Lifecycle and failure behavior
 
@@ -114,7 +176,7 @@ provide compare-and-set coordination.
 - [`RunHandle::wait`] observes natural completion without requesting shutdown.
   Both lifecycle methods report task panics and cancellations and stop the
   remaining tasks after a failure.
-- Handler, callback, and status-store failures are retried after the owning
+- Handler, callback, and progress-store failures are retried after the owning
   implementation's `retry_delay()`.
 - Handler range delivery is at-least-once. A timed-out or failed
   `sync_range()` call is retried for the same range, so handler effects must be
@@ -138,11 +200,11 @@ provide compare-and-set coordination.
 ## Public API
 
 Public items use module-qualified paths. Error types are under [`errors`], the
-in-memory status implementation is under [`mem_status_store`], and engine types
+in-memory progress implementation is under [`mem_progress_store`], and engine types
 and extension traits are under [`sync_engine`]. The main types are [`SyncEngine`],
 [`Builder`], [`HeightProvider`], [`Synchronizer`], [`RunHandle`], and
-[`MemStatusStore`]. Consumer-owned extension points are [`HeightLoader`],
-[`SyncHandler`], [`SyncStatusStore`], [`ProgressProvider`], and [`SyncCallback`].
+[`MemProgressStore`]. Consumer-owned extension points are [`HeightLoader`],
+[`SyncHandler`], [`SyncProgressStore`], [`ProgressProvider`], and [`SyncCallback`].
 Each progress subscription returns a [`ProgressReceiver`].
 `Builder::add_height_provider` accepts any [`HeightLoader`], and
 `Builder::add_synchronizer` accepts any [`SyncHandler`], through their standard
@@ -160,11 +222,11 @@ another indefinitely.
 
 Height providers and handlers are owned by one engine task and need only implement
 `Send + 'static`. `SyncHandler::sync_range` receives `&mut self`, so stateful
-implementations can update their own fields without internal locking. Status
+implementations can update their own fields without internal locking. Progress
 stores and callbacks are shared between tasks and therefore remain
 `Send + Sync + 'static`.
 
-Store implementations provide [`SyncStatusStore::initial_synced_height`] from
+Store implementations provide [`SyncProgressStore::initial_synced_height`] from
 constructor or application configuration. The trait's default
 `load_synced_or_initial` implementation owns the durable fallback algorithm;
 handlers only process ranges.
@@ -191,21 +253,24 @@ All engine metric series identify their height provider or synchronizer with
 the `handler_id` label.
 
 Height gauges use unsigned `u64` storage. Prometheus exposes numeric samples as
-`f64`, so scraped height values above `2^53` may lose unit precision; engine
-processing and `SyncStatusStore` persistence still retain the full `u64` value.
+`f64`, so scraped height values above `2^53` may lose unit precision. Engine
+processing and the progress-store trait retain the full `u64` domain; the
+optional ScyllaDB implementation is limited to `i64::MAX` by its CQL schema.
 
 ## Toolchain and features
 
-The crate uses Rust 2024 and supports Rust 1.95 and newer. It has no optional
-Cargo features. Diagnostics contain no ANSI escapes and are emitted through
-`tracing`; applications install and configure their own subscriber.
+The crate uses Rust 2024 and supports Rust 1.95 and newer. Its non-default
+`scylla` feature adds [`ScyllaProgressStore`] and `stonfi_scylla_client`.
+Diagnostics contain no ANSI escapes and are emitted through `tracing`;
+applications install and configure their own subscriber.
 
 ## Validation
 
 ```text
 cargo test -p stonfi_sync_core --all-features --locked
 cargo test -p stonfi_sync_core --doc --locked
-cargo test -p stonfi_sync_core --examples --locked
+cargo test -p stonfi_sync_core --examples --all-features --locked
+cargo test -p stonfi_sync_core --features scylla --test scylla_progress_store --locked -- --ignored --test-threads=1
 cargo +nightly fmt --check
 cargo clippy -p stonfi_sync_core --all-targets --all-features --locked -- -D warnings
 RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc -p stonfi_sync_core --no-deps --all-features --locked
@@ -217,10 +282,11 @@ cargo publish --dry-run --locked -p stonfi_sync_core
 [`Builder`]: crate::sync_engine::Builder
 [`Builder::with_shutdown_timeout`]: crate::sync_engine::Builder::with_shutdown_timeout
 [`HeightProvider`]: crate::sync_engine::HeightProvider
-[`MemStatusStore`]: crate::mem_status_store::MemStatusStore
+[`MemProgressStore`]: crate::mem_progress_store::MemProgressStore
 [`RunHandle`]: crate::sync_engine::RunHandle
 [`RunHandle::shutdown`]: crate::sync_engine::RunHandle::shutdown
 [`RunHandle::wait`]: crate::sync_engine::RunHandle::wait
+[`ScyllaProgressStore`]: crate::scylla_progress_store::ScyllaProgressStore
 [`SyncCallback`]: crate::sync_engine::SyncCallback
 [`SyncEngine`]: crate::sync_engine::SyncEngine
 [`SyncEngine::builder`]: crate::sync_engine::SyncEngine::builder
@@ -230,12 +296,12 @@ cargo publish --dry-run --locked -p stonfi_sync_core
 [`SyncHandler::sync_timeout`]: crate::sync_engine::SyncHandler::sync_timeout
 [`INITIAL_HEIGHT`]: crate::sync_engine::INITIAL_HEIGHT
 [`HeightLoader`]: crate::sync_engine::HeightLoader
-[`SyncStatusStore`]: crate::sync_engine::SyncStatusStore
-[`SyncStatusStore::initial_synced_height`]: crate::sync_engine::SyncStatusStore::initial_synced_height
-[`SyncStatusStore::load_synced_or_initial`]: crate::sync_engine::SyncStatusStore::load_synced_or_initial
+[`SyncProgressStore`]: crate::sync_engine::SyncProgressStore
+[`SyncProgressStore::initial_synced_height`]: crate::sync_engine::SyncProgressStore::initial_synced_height
+[`SyncProgressStore::load_synced_or_initial`]: crate::sync_engine::SyncProgressStore::load_synced_or_initial
 [`ProgressProvider`]: crate::sync_engine::ProgressProvider
 [`ProgressReceiver`]: crate::sync_engine::ProgressReceiver
 [`Synchronizer`]: crate::sync_engine::Synchronizer
 [`errors`]: crate::errors
-[`mem_status_store`]: crate::mem_status_store
+[`mem_progress_store`]: crate::mem_progress_store
 [`sync_engine`]: crate::sync_engine

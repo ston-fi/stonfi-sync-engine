@@ -2,9 +2,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use stonfi_sync_core::errors::SyncCoreResult;
-use stonfi_sync_core::mem_status_store::MemStatusStore;
+use stonfi_sync_core::mem_progress_store::MemProgressStore;
 use stonfi_sync_core::sync_engine::{
-    HeightLoader, HeightProvider, SyncCallback, SyncEngine, SyncHandler, SyncHeight, SyncStatusStore,
+    HeightLoader, HeightProvider, SyncCallback, SyncEngine, SyncHandler, SyncHeight, SyncProgressStore,
 };
 use tracing_subscriber::EnvFilter;
 
@@ -97,10 +97,10 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt().with_env_filter(filter).init();
     stonfi_metrics::init_metrics!()?;
 
-    // `MemStatusStore` keeps synced heights in memory. The constructor's `0`
+    // `MemProgressStore` keeps synced heights in memory. The constructor's `0`
     // configures the engine-wide fallback that is stored under `INITIAL` when
-    // the first synchronizer starts without persisted status.
-    let status_store = Arc::new(MemStatusStore::new(0));
+    // the first synchronizer starts without persisted progress.
+    let progress_store = Arc::new(MemProgressStore::new(0));
 
     let height_provider = HeightProvider::new(ExampleHeightLoader {
         id: "example_height_source",
@@ -113,7 +113,7 @@ async fn main() -> anyhow::Result<()> {
     //
     // Passing `&height_provider` makes the synchronizer depend on its progress. The
     // builder clones the progress receiver before taking ownership below.
-    let engine = SyncEngine::builder(status_store.clone())
+    let engine = SyncEngine::builder(progress_store.clone())
         .add_synchronizer(ExampleHandler { id: "example_sync" }, &[&height_provider])?
         .add_height_provider(height_provider)?
         .add_callback(Arc::new(ExampleCallback))
@@ -130,7 +130,7 @@ async fn main() -> anyhow::Result<()> {
     // not wait for completion.
     run_handle.shutdown().await?;
 
-    let final_height = status_store.load_synced_height("example_sync").await?;
+    let final_height = progress_store.load_synced_height("example_sync").await?;
     tracing::info!("final synced height: {}", final_height.unwrap_or_default());
     tracing::info!("swap the toy height loader/handler with real implementations to build your service.");
 

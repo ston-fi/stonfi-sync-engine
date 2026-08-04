@@ -6,8 +6,8 @@ use stonfi_distributed_sync::task_server::TaskServer;
 use stonfi_distributed_sync::traits::{DistributedHandler, TaskBatch};
 use stonfi_distributed_sync::worker::Worker;
 use stonfi_sync_core::errors::SyncCoreResult;
-use stonfi_sync_core::mem_status_store::MemStatusStore;
-use stonfi_sync_core::sync_engine::{HeightLoader, HeightProvider, SyncEngine, SyncHeight, SyncStatusStore};
+use stonfi_sync_core::mem_progress_store::MemProgressStore;
+use stonfi_sync_core::sync_engine::{HeightLoader, HeightProvider, SyncEngine, SyncHeight, SyncProgressStore};
 
 struct OneHeightLoader;
 
@@ -66,8 +66,8 @@ async fn main() -> anyhow::Result<()> {
     let worker_handle = worker.run();
 
     let height_provider = HeightProvider::new(OneHeightLoader);
-    let status_store = Arc::new(MemStatusStore::new(0));
-    let engine = SyncEngine::builder(status_store.clone())
+    let progress_store = Arc::new(MemProgressStore::new(0));
+    let engine = SyncEngine::builder(progress_store.clone())
         .add_synchronizer(RangeHandler.into_sync(coordinator), &[&height_provider])?
         .add_height_provider(height_provider)?
         .build();
@@ -75,7 +75,7 @@ async fn main() -> anyhow::Result<()> {
 
     tokio::time::timeout(Duration::from_secs(2), async {
         loop {
-            if status_store.load_synced_height("range").await? == Some(1) {
+            if progress_store.load_synced_height("range").await? == Some(1) {
                 return Ok::<(), stonfi_sync_core::errors::SyncCoreError>(());
             }
             tokio::time::sleep(Duration::from_millis(10)).await;

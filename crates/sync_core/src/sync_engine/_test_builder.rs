@@ -6,11 +6,11 @@ async fn test_builder_rejects_duplicate_handler_ids() -> anyhow::Result<()> {
     init_test_runtime()?;
 
     let height_provider: HeightProvider = TestHeightLoader::new("test_init_dup_sync", 5).into();
-    let status_store = Arc::new(TestStatusStore::new(0));
+    let progress_store = Arc::new(TestProgressStore::new(0));
     let sync_1 = TestSync::new("sync_duplicate", 5);
     let sync_2 = TestSync::new("sync_duplicate", 5);
 
-    let builder = SyncEngine::builder(status_store).add_synchronizer(sync_1, &[&height_provider])?;
+    let builder = SyncEngine::builder(progress_store).add_synchronizer(sync_1, &[&height_provider])?;
     let err = match builder.add_synchronizer(sync_2, &[&height_provider]) {
         Ok(_) => return Err(anyhow::anyhow!("duplicate handler ID should fail")),
         Err(err) => err,
@@ -19,14 +19,14 @@ async fn test_builder_rejects_duplicate_handler_ids() -> anyhow::Result<()> {
 
     let provider_1 = TestHeightLoader::new("duplicate_entity", 5);
     let provider_2 = TestHeightLoader::new("duplicate_entity", 5);
-    let builder = SyncEngine::builder(Arc::new(TestStatusStore::new(0))).add_height_provider(provider_1)?;
+    let builder = SyncEngine::builder(Arc::new(TestProgressStore::new(0))).add_height_provider(provider_1)?;
     assert!(matches!(builder.add_height_provider(provider_2), Err(SyncCoreError::Logic(_))));
 
     let progress_provider: HeightProvider = TestHeightLoader::new("progress_provider", 5).into();
     let sync = TestSync::new("shared_entity", 5);
     let colliding_height_provider = TestHeightLoader::new("shared_entity", 5);
     let builder =
-        SyncEngine::builder(Arc::new(TestStatusStore::new(0))).add_synchronizer(sync, &[&progress_provider])?;
+        SyncEngine::builder(Arc::new(TestProgressStore::new(0))).add_synchronizer(sync, &[&progress_provider])?;
     assert!(matches!(
         builder.add_height_provider(colliding_height_provider),
         Err(SyncCoreError::Logic(_))
@@ -38,17 +38,17 @@ async fn test_builder_rejects_duplicate_handler_ids() -> anyhow::Result<()> {
 async fn test_builder_rejects_reserved_handler_id() -> anyhow::Result<()> {
     init_test_runtime()?;
 
-    let status_store = Arc::new(TestStatusStore::new(0));
+    let progress_store = Arc::new(TestProgressStore::new(0));
     let height_provider: HeightProvider = TestHeightLoader::new(INITIAL_HEIGHT, 5).into();
     assert!(matches!(
-        SyncEngine::builder(status_store.clone()).add_height_provider(height_provider),
+        SyncEngine::builder(progress_store.clone()).add_height_provider(height_provider),
         Err(SyncCoreError::InvalidArgs(_))
     ));
 
     let progress_provider: HeightProvider = TestHeightLoader::new("reserved_id_progress", 5).into();
     let synchronizer = TestSync::new(INITIAL_HEIGHT, 5);
     assert!(matches!(
-        SyncEngine::builder(status_store).add_synchronizer(synchronizer, &[&progress_provider]),
+        SyncEngine::builder(progress_store).add_synchronizer(synchronizer, &[&progress_provider]),
         Err(SyncCoreError::InvalidArgs(_))
     ));
     Ok(())
@@ -93,7 +93,7 @@ async fn test_builder_rejects_invalid_batch_sizes() -> anyhow::Result<()> {
             max,
         }
         .into();
-        let builder = SyncEngine::builder(Arc::new(TestStatusStore::new(0)));
+        let builder = SyncEngine::builder(Arc::new(TestProgressStore::new(0)));
         assert!(matches!(
             builder.add_synchronizer(sync, &[&progress_provider]),
             Err(SyncCoreError::Logic(_))

@@ -11,7 +11,7 @@ async fn test_shutdown_completes_while_custom_progress_sender_is_alive() -> anyh
     let progress_provider = TestProgressProvider(progress_rx);
     let sync: Synchronizer = TestSync::new("live_custom_progress_provider", 0).into();
     let mut sync_progress = sync.subscribe();
-    let engine = SyncEngine::builder(Arc::new(TestStatusStore::new(0)))
+    let engine = SyncEngine::builder(Arc::new(TestProgressStore::new(0)))
         .add_synchronizer(sync, &[&progress_provider])?
         .build();
 
@@ -31,7 +31,7 @@ async fn test_wait_returns_when_custom_progress_provider_closes() -> anyhow::Res
     let progress_provider = TestProgressProvider(progress_rx);
     let sync: Synchronizer = TestSync::new("closing_custom_progress_provider", 0).into();
     let mut sync_progress = sync.subscribe();
-    let engine = SyncEngine::builder(Arc::new(TestStatusStore::new(0)))
+    let engine = SyncEngine::builder(Arc::new(TestProgressStore::new(0)))
         .add_synchronizer(sync, &[&progress_provider])?
         .build();
 
@@ -72,7 +72,7 @@ async fn test_wait_returns_task_join_failure() -> anyhow::Result<()> {
         }
     }
 
-    let engine = SyncEngine::builder(Arc::new(TestStatusStore::new(0)))
+    let engine = SyncEngine::builder(Arc::new(TestProgressStore::new(0)))
         .add_height_provider(PendingHeightLoader)?
         .add_height_provider(PanickingHeightLoader)?
         .build();
@@ -120,7 +120,7 @@ async fn test_shutdown_aborts_a_stuck_consumer_after_timeout() -> anyhow::Result
 
     let started = Arc::new(Notify::new());
     let dropped = Arc::new(AtomicBool::new(false));
-    let engine = SyncEngine::builder(Arc::new(TestStatusStore::new(0)))
+    let engine = SyncEngine::builder(Arc::new(TestProgressStore::new(0)))
         .with_shutdown_timeout(Duration::from_millis(20))
         .add_height_provider(PendingHeightLoader {
             started: started.clone(),

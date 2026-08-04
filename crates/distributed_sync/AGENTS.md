@@ -40,7 +40,7 @@ only the handler type and stable ID are shared across binaries. A handler ID
 must be stable and identical in every coordinator and worker binary.
 `SyncEngine`'s builder owns ID validation when the synchronizer is registered;
 distributed constructors do not duplicate it. Initial-height configuration
-belongs to the core `SyncStatusStore`, not to distributed handlers.
+belongs to the core `SyncProgressStore`, not to distributed handlers.
 
 Public fallible APIs return `stonfi_sync_core::errors::SyncCoreResult`. Keep
 transport-generated protobuf types private. `TaskBatch` owns ordered tasks and
@@ -104,7 +104,7 @@ integration references.
   entries.
 - Worker failures retry after the handler's backoff until the enclosing handler
   timeout. Task creation, queueing, worker capacity waits, and processing share
-  that deadline. The core engine still owns range-level retries and status
+  that deadline. The core engine still owns range-level retries and progress
   persistence.
 - `run()` returns the only owner of spawned server or worker tasks. Dropping the
   handle requests best-effort cancellation; `shutdown()` cancels, waits

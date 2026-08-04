@@ -39,7 +39,7 @@ pub type SyncHeight = u64;
 
 /// Coordinates height providers and synchronizers and runs the dependency graph.
 pub struct SyncEngine {
-    status_store: Arc<dyn SyncStatusStore>,
+    progress_store: Arc<dyn SyncProgressStore>,
     callbacks: Vec<Arc<dyn SyncCallback>>,
     log_progress: fn(SyncHeight, SyncHeight) -> bool,
     height_providers: Vec<HeightProvider>,
@@ -48,10 +48,10 @@ pub struct SyncEngine {
 }
 
 impl SyncEngine {
-    /// Creates a builder backed by `status_store`.
+    /// Creates a builder backed by `progress_store`.
     #[must_use]
-    pub fn builder(status_store: Arc<dyn SyncStatusStore>) -> Builder {
-        Builder::new(status_store)
+    pub fn builder(progress_store: Arc<dyn SyncProgressStore>) -> Builder {
+        Builder::new(progress_store)
     }
 
     /// Starts all registered handlers and returns their runtime owner.
@@ -61,7 +61,7 @@ impl SyncEngine {
     /// Panics outside Tokio or when metrics were not initialized.
     pub fn run(self) -> RunHandle {
         let Self {
-            status_store,
+            progress_store,
             callbacks,
             log_progress,
             height_providers,
@@ -84,7 +84,7 @@ impl SyncEngine {
             let ctx = SyncCtx {
                 receiver,
                 cancellation: cancellation.clone(),
-                status_store: status_store.clone(),
+                progress_store: progress_store.clone(),
                 callbacks: callbacks.clone(),
                 log_progress,
             };

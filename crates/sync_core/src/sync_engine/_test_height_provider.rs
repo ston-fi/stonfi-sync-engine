@@ -27,21 +27,21 @@ async fn test_initial_loaded_height_is_published() -> anyhow::Result<()> {
         }
     }
 
-    let status_store = Arc::new(TestStatusStore::new(0));
+    let progress_store = Arc::new(TestProgressStore::new(0));
     let height_provider: HeightProvider = FixedHeightLoader {
         id: "fixed_initial_height".to_string(),
     }
     .into();
     let id = "sync_initial_publish".to_string();
     let sync = TestSync::new(&id, 0);
-    let engine = SyncEngine::builder(status_store.clone())
+    let engine = SyncEngine::builder(progress_store.clone())
         .add_synchronizer(sync, &[&height_provider])?
         .add_height_provider(height_provider)?
         .build();
 
     let run_handle = engine.run();
     tokio::time::timeout(Duration::from_millis(500), async {
-        while status_store.load_synced_height(&id).await? != Some(7) {
+        while progress_store.load_synced_height(&id).await? != Some(7) {
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
         Ok::<(), SyncCoreError>(())
@@ -125,7 +125,7 @@ async fn initial_events(height: SyncHeight) -> anyhow::Result<Vec<InitialEvent>>
         events: events.clone(),
         done: Notify::new(),
     });
-    let engine = SyncEngine::builder(Arc::new(TestStatusStore::new(0)))
+    let engine = SyncEngine::builder(Arc::new(TestProgressStore::new(0)))
         .add_height_provider(InitialHeightLoader {
             height,
             calls: 0,
@@ -209,7 +209,7 @@ async fn test_initial_published_callback_retry_does_not_republish() -> anyhow::R
         second_attempt: Notify::new(),
         finish: Notify::new(),
     });
-    let engine = SyncEngine::builder(Arc::new(TestStatusStore::new(0)))
+    let engine = SyncEngine::builder(Arc::new(TestProgressStore::new(0)))
         .add_height_provider(height_provider)?
         .add_callback(callback.clone())
         .build();
@@ -297,7 +297,7 @@ async fn test_height_loaded_callback_retries_same_event() -> anyhow::Result<()> 
         second_attempt: Notify::new(),
         release: Notify::new(),
     });
-    let engine = SyncEngine::builder(Arc::new(TestStatusStore::new(0)))
+    let engine = SyncEngine::builder(Arc::new(TestProgressStore::new(0)))
         .add_height_provider(height_provider)?
         .add_callback(callback.clone())
         .build();
@@ -335,7 +335,7 @@ async fn test_shutdown_interrupts_callback_retry_loop() -> anyhow::Result<()> {
     let height_provider: HeightProvider = TestHeightLoader::new("callback_shutdown", 1).into();
     let receiver = height_provider.subscribe();
     let callback = Arc::new(FailingCallback { called: Notify::new() });
-    let engine = SyncEngine::builder(Arc::new(TestStatusStore::new(0)))
+    let engine = SyncEngine::builder(Arc::new(TestProgressStore::new(0)))
         .add_height_provider(height_provider)?
         .add_callback(callback.clone())
         .build();
@@ -374,7 +374,7 @@ async fn test_shutdown_during_successful_callback_prevents_publication() -> anyh
         started: Notify::new(),
         release: Notify::new(),
     });
-    let engine = SyncEngine::builder(Arc::new(TestStatusStore::new(0)))
+    let engine = SyncEngine::builder(Arc::new(TestProgressStore::new(0)))
         .add_height_provider(height_provider)?
         .add_callback(callback.clone())
         .build();

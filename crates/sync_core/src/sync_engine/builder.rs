@@ -3,7 +3,7 @@ use crate::sync_engine::height_provider::HeightProvider;
 use crate::sync_engine::progress::MultiReceiver;
 use crate::sync_engine::synchronizer::Synchronizer;
 use crate::sync_engine::traits::ProgressProvider;
-use crate::sync_engine::{INITIAL_HEIGHT, SyncCallback, SyncEngine, SyncHeight, SyncStatusStore};
+use crate::sync_engine::{INITIAL_HEIGHT, SyncCallback, SyncEngine, SyncHeight, SyncProgressStore};
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
@@ -12,7 +12,7 @@ const DEFAULT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Builds a [`SyncEngine`] with height providers, synchronizers, and callbacks.
 pub struct Builder {
-    status_store: Arc<dyn SyncStatusStore>,
+    progress_store: Arc<dyn SyncProgressStore>,
     log_progress: fn(SyncHeight, SyncHeight) -> bool,
     height_providers: Vec<HeightProvider>,
     synchronizers: Vec<(Synchronizer, MultiReceiver)>,
@@ -22,9 +22,9 @@ pub struct Builder {
 }
 
 impl Builder {
-    pub(super) fn new(status_store: Arc<dyn SyncStatusStore>) -> Self {
+    pub(super) fn new(progress_store: Arc<dyn SyncProgressStore>) -> Self {
         Self {
-            status_store,
+            progress_store,
             log_progress: |_, _| true,
             height_providers: Default::default(),
             synchronizers: Default::default(),
@@ -114,7 +114,7 @@ impl Builder {
     /// Finalizes the builder and returns the engine.
     pub fn build(self) -> SyncEngine {
         SyncEngine {
-            status_store: self.status_store,
+            progress_store: self.progress_store,
             callbacks: self.callbacks,
             log_progress: self.log_progress,
             height_providers: self.height_providers,

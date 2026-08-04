@@ -7,4 +7,4 @@ publish = false
 [dependencies]
 async-trait = "0.1"
 stonfi_distributed_sync = { git = "__REPOSITORY_URL__", rev = "__REVISION__" }
-stonfi_sync_core = { git = "__REPOSITORY_URL__", rev = "__REVISION__" }
+stonfi_sync_core = { git = "__REPOSITORY_URL__", rev = "__REVISION__", features = ["scylla"] }

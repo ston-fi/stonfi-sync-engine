@@ -1,6 +1,6 @@
 [package]
 name = "stonfi_sync_core"
-version = "0.1.0"
+version = "0.2.0"
 edition.workspace = true
 rust-version.workspace = true
 description = "Dependency-aware asynchronous synchronization engine"
@@ -16,10 +16,15 @@ include = [
     "README.md",
     "examples/**",
     "src/**",
+    "tests/**",
 ]
 
 [lib]
 name = "stonfi_sync_core"
+
+[features]
+default = []
+scylla = ["dep:stonfi_scylla_client"]
 
 [dependencies]
 anyhow.workspace = true
@@ -27,6 +32,7 @@ async-trait.workspace = true
 futures.workspace = true
 parking_lot.workspace = true
 stonfi_metrics.workspace = true
+stonfi_scylla_client = { workspace = true, optional = true }
 strum.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["rt", "sync", "time"] }
@@ -34,5 +40,14 @@ tokio-util.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+testcontainers.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 tracing-subscriber.workspace = true
+
+[[test]]
+name = "scylla_progress_store"
+required-features = ["scylla"]
+
+[[example]]
+name = "scylla"
+required-features = ["scylla"]

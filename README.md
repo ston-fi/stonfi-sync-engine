@@ -8,7 +8,7 @@ layer lives in its own package under `crates/`.
 
 | Package | Path | Responsibility |
 | --- | --- | --- |
-| [`stonfi_sync_core`](crates/sync_core/README.md) | `crates/sync_core` | Dependency-aware synchronization of ordered heights |
+| [`stonfi_sync_core`](crates/sync_core/README.md) | `crates/sync_core` | Dependency-aware synchronization of ordered heights, with optional ScyllaDB progress storage |
 | [`stonfi_distributed_sync`](crates/distributed_sync/README.md) | `crates/distributed_sync` | Distributed task coordination, gRPC servers, and workers |
 
 `stonfi_distributed_sync` is a separate package depending on
@@ -26,6 +26,9 @@ stonfi_distributed_sync = "0.1"
 stonfi_sync_core = "0.1"
 ```
 
+Enable `stonfi_sync_core`'s non-default `scylla` feature when the engine should
+persist handler progress in an existing ScyllaDB keyspace.
+
 Package versions remain independent. Release-plz creates a package-specific tag
 and GitHub Release for each published version.
 
@@ -40,7 +43,8 @@ trusted-network boundary, metrics, and runnable example.
 ```text
 cargo test --workspace --all-features --locked
 cargo test --workspace --doc --locked
-cargo test --workspace --examples --locked
+cargo test --workspace --examples --all-features --locked
+cargo test -p stonfi_sync_core --features scylla --test scylla_progress_store --locked -- --ignored --test-threads=1
 cargo +nightly fmt --check
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc --workspace --no-deps --all-features --locked

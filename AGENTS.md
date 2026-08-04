@@ -51,7 +51,7 @@ Full gate:
 
 ```text
 cargo test --workspace --doc --locked
-cargo test --workspace --examples --locked
+cargo test --workspace --examples --all-features --locked
 cargo +nightly fmt --check
 RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc --workspace --no-deps --all-features --locked
 cargo +1.95.0 check --workspace --all-features --locked

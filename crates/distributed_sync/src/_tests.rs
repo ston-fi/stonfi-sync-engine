@@ -9,9 +9,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 use stonfi_sync_core::errors::{SyncCoreError, SyncCoreResult};
-use stonfi_sync_core::mem_status_store::MemStatusStore;
+use stonfi_sync_core::mem_progress_store::MemProgressStore;
 use stonfi_sync_core::sync_engine::{
-    HeightLoader, HeightProvider, SyncEngine, SyncHandler, SyncHeight, SyncStatusStore,
+    HeightLoader, HeightProvider, SyncEngine, SyncHandler, SyncHeight, SyncProgressStore,
 };
 
 fn init_test_metrics() -> anyhow::Result<()> {
@@ -168,8 +168,8 @@ async fn test_sync_engine_runs_through_server_and_worker() -> anyhow::Result<()>
     let handler_id = "engine-end-to-end";
     let (distributed, worker, server) = setup(TestHandler::new(handler_id), TestHandler::new(handler_id)).await?;
     let height_provider = HeightProvider::new(OneHeightLoader);
-    let status_store = Arc::new(MemStatusStore::new(0));
-    let engine = SyncEngine::builder(status_store.clone())
+    let progress_store = Arc::new(MemProgressStore::new(0));
+    let engine = SyncEngine::builder(progress_store.clone())
         .add_synchronizer(distributed, &[&height_provider])?
         .add_height_provider(height_provider)?
         .build()
@@ -177,7 +177,7 @@ async fn test_sync_engine_runs_through_server_and_worker() -> anyhow::Result<()>
 
     tokio::time::timeout(Duration::from_secs(1), async {
         loop {
-            if status_store.load_synced_height(handler_id).await? == Some(1) {
+            if progress_store.load_synced_height(handler_id).await? == Some(1) {
                 return Ok::<(), SyncCoreError>(());
             }
             tokio::task::yield_now().await;

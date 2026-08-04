@@ -9,6 +9,10 @@ license = "Apache-2.0"
 repository = "https://github.com/ston-fi/stonfi-sync-engine"
 
 [workspace.dependencies]
+# Internal
+stonfi_sync_core = { path = "crates/sync_core", version = "0.2" }
+
+# External
 anyhow = "1"
 async-trait = "0.1"
 bincode = { version = "2", features = ["derive"] }
@@ -18,8 +22,9 @@ prost = "0.14"
 prost-build = "0.14"
 protoc-bin-vendored = "3"
 stonfi_metrics = "0.1"
-stonfi_sync_core = { version = "0.1", path = "crates/sync_core" }
+stonfi_scylla_client = "0.2"
 strum = { version = "0.28", features = ["derive"] }
+testcontainers = "0.27.3"
 thiserror = "2"
 tokio = "1"
 tokio-stream = "0.1"

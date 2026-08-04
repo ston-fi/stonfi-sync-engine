@@ -12,32 +12,36 @@ ordered heights:
 
 - `HeightLoader` loads the latest available height from an upstream source.
 - `SyncHandler` processes bounded inclusive ranges.
-- `SyncStatusStore` persists committed progress and owns the configured initial
+- `SyncProgressStore` persists committed progress and owns the configured initial
   height fallback.
 - `ProgressProvider` supplies progress subscriptions that connect height
   providers and synchronizers into a dependency graph.
 - `SyncCallback` observes lifecycle events.
 
 The crate does not provide distributed locking, multi-writer conflict
-resolution, a durable storage implementation, a Tokio runtime, or distributed
-task transport. Those transport concerns belong to the sibling
-`crates/distributed_sync` package; do not add gRPC, protobuf, server, or worker
-dependencies to the core package.
+resolution, a Tokio runtime, or distributed task transport. It provides an
+optional ScyllaDB-backed progress store behind the non-default `scylla` feature;
+other durable stores remain consumer implementations. Distributed transport
+concerns belong to the sibling `crates/distributed_sync` package; do not add
+gRPC, protobuf, server, or worker dependencies to the core package.
 
 ## Public API and ownership
 
 Keep public paths module-qualified: errors and result types live in `errors`,
-the in-memory implementation lives in `mem_status_store`, and all engine
-types and extension traits live in `sync_engine`. Do not add root re-exports.
+the in-memory implementation lives in `mem_progress_store`, and all engine
+types and extension traits live in `sync_engine`. The optional ScyllaDB store
+lives in `scylla_progress_store`, with its builder in the public `builder`
+submodule. Gate only the `scylla_progress_store` declaration in `lib.rs`; do not
+repeat the feature gate in its source or tests. Do not add root re-exports.
 `SyncEngine`, `Builder`, `HeightProvider`, `Synchronizer`, `RunHandle`, and
-`MemStatusStore` are the primary consumer types. `HeightLoader`, `SyncHandler`,
-`SyncStatusStore`, `ProgressProvider`, and `SyncCallback` are intentional
+`MemProgressStore` are the primary consumer types. `HeightLoader`, `SyncHandler`,
+`SyncProgressStore`, `ProgressProvider`, and `SyncCallback` are intentional
 downstream extension points and must remain externally implementable.
 
 Public ID boundaries use `&str`; store IDs privately as `String` only where
 ownership is required. Height loaders and handlers belong to one task and
 require `Send + 'static`, not `Sync`. `SyncHandler::sync_range` takes
-`&mut self` so stateful handlers do not need internal synchronization. Status
+`&mut self` so stateful handlers do not need internal synchronization. Progress
 stores and callbacks are shared across tasks and require `Send + Sync + 'static`.
 
 Prefer `SyncEngine::builder`, add synchronizers with references to their
@@ -60,7 +64,7 @@ requires a running Tokio runtime before `SyncEngine::run` is called and returns
 typed `SyncCoreError` values for configuration and consumer failures.
 Library diagnostics use `tracing` without embedded ANSI escapes; applications
 own subscriber configuration. Do not add terminal styling to library messages.
-`SyncEngine::builder` is infallible because it only stores the status store;
+`SyncEngine::builder` is infallible because it only stores the progress store;
 keep `Builder::add_synchronizer` and `Builder::add_height_provider` fallible
 because validation happens when each entity is registered.
 
@@ -76,7 +80,17 @@ All engine metric series use `handler_id` for the height-provider or
 synchronizer identifier label.
 Height gauges store `u64`, but Prometheus exposition converts numeric samples
 to `f64` and may lose unit precision above `2^53`; this does not narrow the
-engine or status-store height domain.
+engine height domain. The optional ScyllaDB store is narrower because its CQL
+`bigint` column supports heights only through `i64::MAX`.
+
+`ScyllaProgressStore::builder` requires the initial-height fallback. Configure
+either a prebuilt `ScyllaClient` or both endpoints and an existing keyspace;
+the latter uses the client's defaults. Building applies the idempotent table
+migration and calls `use_keyspace`, so initialize `stonfi_metrics` first. The
+table defaults to `sync_progress`; custom names must remain unquoted CQL
+identifiers. The migration creates no keyspace and performs no legacy backfill.
+Client requests have bounded internal retries, while the synchronizer owns the
+outer retry loop. Do not add another retry or lock inside the store.
 
 ## Invariants and pitfalls
 
@@ -85,15 +99,17 @@ engine or status-store height domain.
 - Dependency graphs must be acyclic. The builder subscribes to providers but
   does not perform graph discovery or cycle detection.
 - `INITIAL_HEIGHT` (`"INITIAL_HEIGHT"`) is the reserved initial-height key in
-  the handler-ID namespace. Status stores receive it through their `handler_id`
+  the handler-ID namespace. Progress stores receive it through their `handler_id`
   arguments, but it must never identify a height provider, synchronizer, or
   dependency-graph entity.
-- Only one active engine may write a given handler ID. The status-store API is
+- Only one active engine may write a given handler ID. The progress-store API is
   not compare-and-set storage; this also applies to `INITIAL_HEIGHT`.
-- `SyncStatusStore::load_synced_or_initial` prefers per-handler state, then the
+- `SyncProgressStore::load_synced_or_initial` prefers per-handler state, then the
   persisted `INITIAL_HEIGHT` state, and only then stores and returns the
   configured fallback.
 - `SyncHeight` is `u64`; height `0` remains the initial no-progress sentinel.
+- `ScyllaProgressStore` rejects heights above `i64::MAX` and negative values read
+  from its CQL `bigint` column.
 - Batch sizes are positive, fit in `SyncHeight`, and satisfy `min <= max`.
 - `sync_range(from, to)` processes an inclusive range and may report only a
   height in that range unless `allow_rewind()` is enabled.
@@ -145,7 +161,8 @@ Full gate:
 
 ```text
 cargo test -p stonfi_sync_core --doc --locked
-cargo test -p stonfi_sync_core --examples --locked
+cargo test -p stonfi_sync_core --examples --all-features --locked
+cargo test -p stonfi_sync_core --features scylla --test scylla_progress_store --locked -- --ignored --test-threads=1
 cargo +nightly fmt --check
 RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc -p stonfi_sync_core --no-deps --all-features --locked
 cargo +1.95.0 check -p stonfi_sync_core --all-features --locked
