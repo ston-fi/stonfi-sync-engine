@@ -10,7 +10,7 @@ repository = "https://github.com/ston-fi/stonfi-sync-engine"
 
 [workspace.dependencies]
 # Internal
-stonfi_sync_core = { path = "crates/sync_core", version = "0.2" }
+stonfi_sync_core = { path = "crates/sync_core", version = "0.3" }
 
 # External
 anyhow = "1"
