@@ -53,6 +53,10 @@ durations through standard Tokio semantics without zero-specific normalization
 or validation. Millisecond wire values saturate to `u64::MAX` only on numeric
 overflow.
 Library diagnostics use `tracing`; applications own subscriber configuration.
+Worker processing-stat logging is disabled by the default zero period. A
+non-zero `with_stats_logging_period` value runs summaries at that interval from
+the existing task counters, with per-handler period deltas for received,
+processed, failed, timed-out, and completion-RPC-failed tasks.
 Height-bearing APIs use the core `u64` `SyncHeight` domain and preserve `0` as
 the initial no-progress sentinel. Handler retry and range controls use
 `retry_delay`, `min_batch_size`, `max_batch_size`, and `allow_rewind`.

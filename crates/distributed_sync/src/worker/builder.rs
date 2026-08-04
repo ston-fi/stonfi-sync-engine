@@ -23,6 +23,7 @@ pub struct Builder {
     endpoint: String,
     parallelism: Option<NonZeroUsize>,
     service_tasks_enabled: bool,
+    stats_logging_period: Duration,
     polling_timeout: Duration,
     reconnect_delay: Duration,
     shutdown_timeout: Duration,
@@ -35,6 +36,7 @@ impl Builder {
             endpoint,
             parallelism: None,
             service_tasks_enabled: false,
+            stats_logging_period: Duration::ZERO,
             polling_timeout: DEFAULT_POLLING_TIMEOUT,
             reconnect_delay: DEFAULT_RECONNECT_DELAY,
             shutdown_timeout: DEFAULT_SHUTDOWN_TIMEOUT,
@@ -53,6 +55,15 @@ impl Builder {
     #[must_use]
     pub fn with_service_tasks_enabled(mut self, enabled: bool) -> Self {
         self.service_tasks_enabled = enabled;
+        self
+    }
+
+    /// Sets the task processing summary logging period.
+    ///
+    /// A zero duration, which is the default, disables summary logging.
+    #[must_use]
+    pub fn with_stats_logging_period(mut self, period: Duration) -> Self {
+        self.stats_logging_period = period;
         self
     }
 
@@ -141,6 +152,7 @@ impl Builder {
                 active_tasks: Arc::new(Semaphore::new(parallelism.get())),
                 handlers: self.handlers,
             }),
+            stats_logging_period: self.stats_logging_period,
         })
     }
 }

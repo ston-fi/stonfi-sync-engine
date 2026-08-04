@@ -1,6 +1,7 @@
 mod builder;
 mod grpc_client;
 mod metrics;
+mod progress_log;
 
 use crate::distributed_adapter::ErasedHandler;
 use crate::proto::complete_request::Outcome;
@@ -10,6 +11,7 @@ use builder::Builder;
 use futures::stream::{FuturesUnordered, StreamExt};
 use grpc_client::GrpcClient;
 use metrics::{PollOutcome, WorkerMetrics, WorkerTaskStatus};
+use progress_log::progress_log_loop;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -22,6 +24,7 @@ use tonic::transport::Endpoint;
 /// Configured worker before execution starts.
 pub struct Worker {
     inner: Arc<Inner>,
+    stats_logging_period: Duration,
 }
 
 impl Worker {
@@ -41,6 +44,9 @@ impl Worker {
     pub fn run(self) -> WorkerRunHandle {
         let cancellation = CancellationToken::new();
         let tasks = FuturesUnordered::new();
+        if !self.stats_logging_period.is_zero() {
+            tasks.push(tokio::spawn(progress_log_loop(cancellation.clone(), self.stats_logging_period)));
+        }
         for _ in 0..self.inner.parallelism {
             tasks.push(tokio::spawn(run_loop(self.inner.clone(), cancellation.clone())));
         }

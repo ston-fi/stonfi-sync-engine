@@ -9,7 +9,11 @@ The crate is distributed from the
 [`stonfi-sync-engine`](https://github.com/ston-fi/stonfi-sync-engine) Git
 repository. It requires Rust 1.95 or newer and a Tokio runtime.
 Diagnostics are emitted through `tracing`; applications install and configure
-their own subscriber.
+their own subscriber. Processing-stat logging is disabled by default. Set a
+non-zero period with
+`Worker::builder(...).with_stats_logging_period(Duration::from_secs(10))` to
+log per-handler deltas for received, successful, failed, timed-out, and
+completion-RPC-failed tasks at that interval.
 
 Height-bearing APIs use the core `u64` `SyncHeight` domain. Height `0` remains
 the core engine's initial no-progress sentinel.

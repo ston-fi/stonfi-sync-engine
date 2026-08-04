@@ -5,6 +5,9 @@ here.
 
 ## Unreleased
 
+- Restore optional per-handler worker processing-stat summaries in application
+  logs. The default zero period disables them; configure a non-zero period with
+  `Worker::builder(...).with_stats_logging_period(...)`.
 - Change `DistributedHandler::into_sync` and
   `Worker::builder(...).add_handler` to consume owned handlers instead of
   `Arc<Handler>`. Applications should construct independent handler instances
