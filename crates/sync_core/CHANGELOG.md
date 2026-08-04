@@ -2,6 +2,15 @@
 
 All notable consumer-facing changes to `stonfi_sync_core` are documented here.
 
+## [0.2.1](https://github.com/ston-fi/stonfi-sync-engine/compare/stonfi_sync_core-v0.2.0...stonfi_sync_core-v0.2.1) - 2026-08-04
+
+### Other
+
+- support untracked Cargo lockfile
+- up version
+- up version
+- add initial height loader
+
 ## [0.1.0](https://github.com/ston-fi/stonfi-sync-engine/releases/tag/stonfi_sync_core-v0.1.0) - 2026-08-04
 
 - Let engine builder registrations accept height loaders and sync handlers
