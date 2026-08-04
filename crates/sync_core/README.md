@@ -109,6 +109,8 @@ order:
 Progress stores receive it through their `handler_id` arguments, but it cannot be
 registered as a height loader or sync handler and never participates in the
 dependency graph.
+Consumers can read its persisted value directly with
+[`SyncProgressStore::load_initial_height`].
 Only one active engine may initialize or write it because progress stores do not
 provide compare-and-set coordination.
 
@@ -298,6 +300,7 @@ cargo publish --dry-run --locked -p stonfi_sync_core
 [`HeightLoader`]: crate::sync_engine::HeightLoader
 [`SyncProgressStore`]: crate::sync_engine::SyncProgressStore
 [`SyncProgressStore::initial_synced_height`]: crate::sync_engine::SyncProgressStore::initial_synced_height
+[`SyncProgressStore::load_initial_height`]: crate::sync_engine::SyncProgressStore::load_initial_height
 [`SyncProgressStore::load_synced_or_initial`]: crate::sync_engine::SyncProgressStore::load_synced_or_initial
 [`ProgressProvider`]: crate::sync_engine::ProgressProvider
 [`ProgressReceiver`]: crate::sync_engine::ProgressReceiver

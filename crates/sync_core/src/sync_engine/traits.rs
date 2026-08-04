@@ -63,6 +63,14 @@ pub trait SyncProgressStore: Send + Sync + 'static {
     async fn save_synced_height(&self, handler_id: &str, sync_height: SyncHeight) -> SyncCoreResult<()>;
     /// Loads the persisted height for `handler_id`.
     async fn load_synced_height(&self, handler_id: &str) -> SyncCoreResult<Option<SyncHeight>>;
+    /// Loads the persisted [`INITIAL_HEIGHT`] value.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when storage access fails.
+    async fn load_initial_height(&self) -> SyncCoreResult<Option<SyncHeight>> {
+        self.load_synced_height(INITIAL_HEIGHT).await
+    }
     /// Loads `handler_id`, falling back to [`INITIAL_HEIGHT`].
     ///
     /// Initializes [`INITIAL_HEIGHT`] from [`Self::initial_synced_height`] when
@@ -75,7 +83,7 @@ pub trait SyncProgressStore: Send + Sync + 'static {
         if let Some(sync_height) = self.load_synced_height(handler_id).await? {
             return Ok(sync_height);
         }
-        if let Some(initial_height) = self.load_synced_height(INITIAL_HEIGHT).await? {
+        if let Some(initial_height) = self.load_initial_height().await? {
             return Ok(initial_height);
         }
 

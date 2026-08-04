@@ -107,6 +107,8 @@ outer retry loop. Do not add another retry or lock inside the store.
 - `SyncProgressStore::load_synced_or_initial` prefers per-handler state, then the
   persisted `INITIAL_HEIGHT` state, and only then stores and returns the
   configured fallback.
+- `SyncProgressStore::load_initial_height` reads the persisted `INITIAL_HEIGHT`
+  state without applying or storing the configured fallback.
 - `SyncHeight` is `u64`; height `0` remains the initial no-progress sentinel.
 - `ScyllaProgressStore` rejects heights above `i64::MAX` and negative values read
   from its CQL `bigint` column.
