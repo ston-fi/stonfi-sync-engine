@@ -269,16 +269,16 @@ applications install and configure their own subscriber.
 ## Validation
 
 ```text
-cargo test -p stonfi_sync_core --all-features --locked
-cargo test -p stonfi_sync_core --doc --locked
-cargo test -p stonfi_sync_core --examples --all-features --locked
-cargo test -p stonfi_sync_core --features scylla --test scylla_progress_store --locked -- --ignored --test-threads=1
+cargo test -p stonfi_sync_core --all-features
+cargo test -p stonfi_sync_core --doc
+cargo test -p stonfi_sync_core --examples --all-features
+cargo test -p stonfi_sync_core --features scylla --test scylla_progress_store -- --ignored --test-threads=1
 cargo +nightly fmt --check
-cargo clippy -p stonfi_sync_core --all-targets --all-features --locked -- -D warnings
-RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc -p stonfi_sync_core --no-deps --all-features --locked
-cargo +1.95.0 check -p stonfi_sync_core --all-features --locked
-cargo package --list --locked -p stonfi_sync_core
-cargo publish --dry-run --locked -p stonfi_sync_core
+cargo clippy -p stonfi_sync_core --all-targets --all-features -- -D warnings
+RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc -p stonfi_sync_core --no-deps --all-features
+cargo +1.95.0 check -p stonfi_sync_core --all-features
+cargo package --list -p stonfi_sync_core
+cargo publish --dry-run -p stonfi_sync_core
 ```
 
 [`Builder`]: crate::sync_engine::Builder

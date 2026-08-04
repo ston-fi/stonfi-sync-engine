@@ -187,23 +187,23 @@ why an artifact is unaffected.
 Fast gate:
 
 ```text
-cargo test -p stonfi_distributed_sync --all-features --locked
-cargo clippy -p stonfi_distributed_sync --all-targets --all-features --locked -- -D warnings
+cargo test -p stonfi_distributed_sync --all-features
+cargo clippy -p stonfi_distributed_sync --all-targets --all-features -- -D warnings
 ```
 
 Full gate from the workspace root:
 
 ```text
-cargo test --workspace --all-features --locked
-cargo test --workspace --doc --locked
-cargo test --workspace --examples --locked
+cargo test --workspace --all-features
+cargo test --workspace --doc
+cargo test --workspace --examples
 cargo +nightly fmt --check
-cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
-RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc --workspace --no-deps --all-features --locked
-cargo +1.95.0 check --workspace --all-features --locked
-cargo package --list --locked -p stonfi_sync_core
-cargo package --list --locked -p stonfi_distributed_sync
-cargo publish --dry-run --locked -p stonfi_sync_core
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc --workspace --no-deps --all-features
+cargo +1.95.0 check --workspace --all-features
+cargo package --list -p stonfi_sync_core
+cargo package --list -p stonfi_distributed_sync
+cargo publish --dry-run -p stonfi_sync_core
 ```
 
 Also compile a fresh external consumer and inspect Cargo metadata/package

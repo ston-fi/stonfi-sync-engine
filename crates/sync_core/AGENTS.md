@@ -155,21 +155,21 @@ second public path for an existing capability.
 Fast gate:
 
 ```text
-cargo test -p stonfi_sync_core --all-features --locked
-cargo clippy -p stonfi_sync_core --all-targets --all-features --locked -- -D warnings
+cargo test -p stonfi_sync_core --all-features
+cargo clippy -p stonfi_sync_core --all-targets --all-features -- -D warnings
 ```
 
 Full gate:
 
 ```text
-cargo test -p stonfi_sync_core --doc --locked
-cargo test -p stonfi_sync_core --examples --all-features --locked
-cargo test -p stonfi_sync_core --features scylla --test scylla_progress_store --locked -- --ignored --test-threads=1
+cargo test -p stonfi_sync_core --doc
+cargo test -p stonfi_sync_core --examples --all-features
+cargo test -p stonfi_sync_core --features scylla --test scylla_progress_store -- --ignored --test-threads=1
 cargo +nightly fmt --check
-RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc -p stonfi_sync_core --no-deps --all-features --locked
-cargo +1.95.0 check -p stonfi_sync_core --all-features --locked
-cargo package --list --locked -p stonfi_sync_core
-cargo publish --dry-run --locked -p stonfi_sync_core
+RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc -p stonfi_sync_core --no-deps --all-features
+cargo +1.95.0 check -p stonfi_sync_core --all-features
+cargo package --list -p stonfi_sync_core
+cargo publish --dry-run -p stonfi_sync_core
 ```
 
 Release-plz publishes this package before a changed `stonfi_distributed_sync`

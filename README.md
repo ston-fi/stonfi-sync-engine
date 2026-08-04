@@ -40,18 +40,22 @@ trusted-network boundary, metrics, and runnable example.
 
 ## Workspace validation
 
+This library workspace intentionally leaves `Cargo.lock` untracked. A clean
+checkout resolves the current dependency versions allowed by the manifests;
+Cargo may create an ignored local lockfile while running these commands.
+
 ```text
-cargo test --workspace --all-features --locked
-cargo test --workspace --doc --locked
-cargo test --workspace --examples --all-features --locked
-cargo test -p stonfi_sync_core --features scylla --test scylla_progress_store --locked -- --ignored --test-threads=1
+cargo test --workspace --all-features
+cargo test --workspace --doc
+cargo test --workspace --examples --all-features
+cargo test -p stonfi_sync_core --features scylla --test scylla_progress_store -- --ignored --test-threads=1
 cargo +nightly fmt --check
-cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
-RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc --workspace --no-deps --all-features --locked
-cargo +1.95.0 check --workspace --all-features --locked
-cargo package --list --locked -p stonfi_sync_core
-cargo package --list --locked -p stonfi_distributed_sync
-cargo publish --dry-run --locked -p stonfi_sync_core
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc --workspace --no-deps --all-features
+cargo +1.95.0 check --workspace --all-features
+cargo package --list -p stonfi_sync_core
+cargo package --list -p stonfi_distributed_sync
+cargo publish --dry-run -p stonfi_sync_core
 bash .github/check-external-consumer.sh
 ```
 

@@ -27,8 +27,12 @@ guide and the relevant package guide.
 ## Workspace changes
 
 - Keep the root manifest virtual; do not add a root Rust package.
-- Keep package names, paths, README links, CI commands, lockfile, and workspace
-  members synchronized.
+- Keep package names, paths, README links, CI commands, and workspace members
+  synchronized.
+- This library workspace intentionally does not track `Cargo.lock`. Keep it
+  ignored and do not pass `--locked` to repository validation or automation;
+  clean checkouts resolve the current dependency versions allowed by the
+  manifests.
 - Preserve independent package versioning.
 - Keep package changelogs concise and consumer-facing; do not use them as
   development logs.
@@ -43,21 +47,21 @@ guide and the relevant package guide.
 Fast gate:
 
 ```text
-cargo test --workspace --all-features --locked
-cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+cargo test --workspace --all-features
+cargo clippy --workspace --all-targets --all-features -- -D warnings
 ```
 
 Full gate:
 
 ```text
-cargo test --workspace --doc --locked
-cargo test --workspace --examples --all-features --locked
+cargo test --workspace --doc
+cargo test --workspace --examples --all-features
 cargo +nightly fmt --check
-RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc --workspace --no-deps --all-features --locked
-cargo +1.95.0 check --workspace --all-features --locked
-cargo package --list --locked -p stonfi_sync_core
-cargo package --list --locked -p stonfi_distributed_sync
-cargo publish --dry-run --locked -p stonfi_sync_core
+RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc --workspace --no-deps --all-features
+cargo +1.95.0 check --workspace --all-features
+cargo package --list -p stonfi_sync_core
+cargo package --list -p stonfi_distributed_sync
+cargo publish --dry-run -p stonfi_sync_core
 bash .github/check-external-consumer.sh
 ```
 
