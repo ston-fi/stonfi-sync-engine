@@ -18,12 +18,12 @@ independent dependency and release boundary.
 
 ## Installation
 
-The `v0.0.1` workspace tag contains both packages:
+The `v0.0.3` workspace tag contains both packages:
 
 ```toml
 [dependencies]
-stonfi_distributed_sync = { git = "https://github.com/ston-fi/stonfi-sync-engine", tag = "v0.0.1" }
-stonfi_sync_core = { git = "https://github.com/ston-fi/stonfi-sync-engine", tag = "v0.0.1" }
+stonfi_distributed_sync = { git = "https://github.com/ston-fi/stonfi-sync-engine", tag = "v0.0.3" }
+stonfi_sync_core = { git = "https://github.com/ston-fi/stonfi-sync-engine", tag = "v0.0.3" }
 ```
 
 Package versions remain independent. A workspace tag is used only for a

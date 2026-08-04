@@ -34,7 +34,7 @@ Depend on the crate from the Git repository at the release tag:
 
 ```toml
 [dependencies]
-stonfi_sync_core = { git = "https://github.com/ston-fi/stonfi-sync-engine", tag = "v0.0.1" }
+stonfi_sync_core = { git = "https://github.com/ston-fi/stonfi-sync-engine", tag = "v0.0.3" }
 stonfi_metrics = { version = "0.0.1", git = "https://github.com/ston-fi/stonfi-metrics", rev = "v0.0.1" }
 ```
 

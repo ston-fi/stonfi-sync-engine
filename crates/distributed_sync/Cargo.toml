@@ -1,6 +1,6 @@
 [package]
 name = "stonfi_distributed_sync"
-version = "0.0.2"
+version = "0.0.3"
 edition.workspace = true
 rust-version.workspace = true
 description = "Distributed gRPC workers for STON.fi synchronization engines"
@@ -32,7 +32,7 @@ futures = "0.3"
 parking_lot = "0.12"
 prost = "0.14"
 stonfi_metrics.workspace = true
-stonfi_sync_core = { version = "0.0.2", path = "../sync_core" }
+stonfi_sync_core = { version = "0.0.3", path = "../sync_core" }
 strum = { version = "0.28", features = ["derive"] }
 tokio = { version = "1", features = ["net", "rt", "sync", "time"] }
 tokio-stream = { version = "0.1", features = ["net"] }
