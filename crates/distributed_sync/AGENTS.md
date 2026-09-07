@@ -94,15 +94,35 @@ integration references.
 - Except for service-task eligibility, every worker may receive any task. A
   worker without the assigned handler reports a retryable failure; do not add
   handler capability routing or handler-indexed queues.
-- Service-capable workers select the service queue before the regular queue.
-  Within either queue, higher priority dispatches first and equal-priority
-  tasks are FIFO.
-- A service task owns all task permits while it executes. Do not weaken this
-  exclusivity when changing worker concurrency. Polling must not consume task
-  permits.
+- The coordinator reserves at most one service assignment across all its workers
+  through capacity waiting, execution, and completion reporting. Admission and
+  reservation changes must share the queue mutex. While reserved, dispatch no
+  additional tasks to its owner; other workers may receive regular tasks.
+  Independent coordinators do not share this limit.
+- Every worker polling loop uses the same service eligibility. Do not restore a
+  dedicated service poller or per-process service counter: the coordinator owns
+  admission. Eligible polls select the service queue first when its slot is free,
+  otherwise regular work. Within each queue, priority then FIFO determines order.
+- Worker identities must distinguish workers across processes and containers,
+  remain stable across reconnects, and be shared by all of one worker's loops.
+  PID plus a process-local counter is insufficient. Only completion from the
+  reservation's owner may release it; stale completion must never release a
+  newer service assignment.
+- A service task owns all task permits while it executes. Already-running
+  regular tasks must finish before the service handler starts. No regular or
+  other service handler may execute on that worker until it finishes or is
+  cancelled. This prevents CPU contention between handler tasks on the same
+  worker: do not add a separate service execution pool or otherwise allow
+  regular handlers to run alongside it.
+  Polling must not consume task permits.
 - Cancelled coordinator futures must remove or invalidate their queued and
   in-flight assignments. Do not leave abandoned work or unbounded stale heap
-  entries.
+  entries. A dispatched service reservation survives caller cancellation until
+  worker completion or its original deadline, since cancellation is not sent to
+  the worker. Reject its stale result even when completion releases the slot.
+  Completion must wake blocked polls, and polls must also wake at the reservation
+  deadline so worker loss cannot stall dispatch indefinitely. Expiry assumes
+  cooperative worker deadlines; this is not distributed execution fencing.
 - Worker failures retry after the handler's backoff until the enclosing handler
   timeout. Task creation, queueing, worker capacity waits, and processing share
   that deadline. The core engine still owns range-level retries and progress

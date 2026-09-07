@@ -272,19 +272,19 @@ mod tests {
         for _ in 0..MAX_ONGOING_TASKS {
             assignments.push_back(
                 coordinator
-                    .poll(Duration::from_secs(1), false)
+                    .poll("worker", Duration::from_secs(1), false)
                     .await
                     .ok_or_else(|| anyhow::anyhow!("expected a buffered assignment"))?,
             );
         }
-        assert!(coordinator.poll(Duration::from_millis(10), false).await.is_none());
+        assert!(coordinator.poll("worker", Duration::from_millis(10), false).await.is_none());
 
         let first = assignments
             .pop_front()
             .ok_or_else(|| anyhow::anyhow!("expected the first buffered assignment"))?;
         complete_assignment(&coordinator, first.assignment_id)?;
         let final_assignment = coordinator
-            .poll(Duration::from_secs(1), false)
+            .poll("worker", Duration::from_secs(1), false)
             .await
             .ok_or_else(|| anyhow::anyhow!("expected the final buffered assignment"))?;
 
@@ -312,7 +312,7 @@ mod tests {
         for _ in 0..3 {
             assignments.push(
                 coordinator
-                    .poll(Duration::from_secs(1), false)
+                    .poll("worker", Duration::from_secs(1), false)
                     .await
                     .ok_or_else(|| anyhow::anyhow!("expected an assignment"))?,
             );

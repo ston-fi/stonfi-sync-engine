@@ -3,6 +3,19 @@
 All notable consumer-facing changes to `stonfi_distributed_sync` are documented
 here.
 
+## [Unreleased]
+
+### Fixed
+
+- Serialize service assignments across all workers of a coordinator and pause
+  further dispatch to the assigned worker until completion or deadline. Other
+  workers continue regular work; service execution retains exclusive worker
+  capacity. Caller cancellation keeps the reservation until completion or the
+  original deadline. All polling loops use the same service eligibility.
+- Generate random worker identities to avoid PID/counter collisions across
+  containers. Upgrade both coordinators and workers for correct scheduling;
+  public construction APIs and protobuf fields are unchanged.
+
 ## [0.3.0](https://github.com/ston-fi/stonfi-sync-engine/compare/stonfi_distributed_sync-v0.2.1...stonfi_distributed_sync-v0.3.0) - 2026-08-04
 
 ### Other
