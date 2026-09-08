@@ -5,13 +5,14 @@ mod types;
 pub(crate) use types::TaskDeadline;
 pub use types::TaskPriority;
 
-use crate::distributed_adapter::ErasedHandler;
 use crate::proto::complete_request::Outcome;
 use crate::proto::{CompleteRequest, TaskAssignment};
+use crate::traits::DistributedHandler;
 use metrics::{CoordinatorMetrics, CoordinatorTaskStatus};
 use parking_lot::Mutex;
 use queue::TaskQueue;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
@@ -21,6 +22,8 @@ use tokio::sync::{Notify, oneshot};
 /// Process-local task queues and in-flight assignments shared by all clones.
 ///
 /// The coordinator is not durable and does not own the server or workers.
+/// It dispatches at most one service assignment across all its workers until
+/// completion or the assignment deadline, and pauses dispatch to its owner.
 #[derive(Clone, Default)]
 pub struct Coordinator {
     inner: Arc<Inner>,
@@ -35,15 +38,20 @@ impl Coordinator {
 
     pub(crate) async fn handle_task(
         &self,
-        handler: Arc<dyn ErasedHandler>,
+        handler: &impl DistributedHandler,
         payload: Vec<u8>,
         deadline: TaskDeadline,
     ) -> SyncCoreResult<Vec<u8>> {
         self.inner.handle_task(handler, payload, deadline).await
     }
 
-    pub(crate) async fn poll(&self, polling_timeout: Duration, service_tasks_enabled: bool) -> Option<TaskAssignment> {
-        self.inner.poll(polling_timeout, service_tasks_enabled).await
+    pub(crate) async fn poll(
+        &self,
+        worker_id: &str,
+        polling_timeout: Duration,
+        service_tasks_enabled: bool,
+    ) -> Option<TaskAssignment> {
+        self.inner.poll(worker_id, polling_timeout, service_tasks_enabled).await
     }
 
     pub(crate) fn complete(&self, request: CompleteRequest) -> SyncCoreResult<()> {
@@ -67,6 +75,13 @@ struct Inner {
 struct State {
     queue: TaskQueue,
     ongoing: HashMap<u64, OngoingTask>,
+    service_assignment: Option<ServiceAssignment>,
+}
+
+struct ServiceAssignment {
+    assignment_id: u64,
+    worker_id: String,
+    deadline: tokio::time::Instant,
 }
 
 struct OngoingTask {
@@ -78,7 +93,7 @@ struct OngoingTask {
 impl Inner {
     async fn handle_task(
         self: &Arc<Self>,
-        handler: Arc<dyn ErasedHandler>,
+        handler: &impl DistributedHandler,
         payload: Vec<u8>,
         deadline: TaskDeadline,
     ) -> SyncCoreResult<Vec<u8>> {
@@ -169,43 +184,70 @@ impl Inner {
         receiver
     }
 
-    async fn poll(&self, polling_timeout: Duration, service_tasks_enabled: bool) -> Option<TaskAssignment> {
+    async fn poll(
+        &self,
+        worker_id: &str,
+        polling_timeout: Duration,
+        service_tasks_enabled: bool,
+    ) -> Option<TaskAssignment> {
         let poll = async {
             loop {
                 let notified = self.task_available.notified();
-                if let Some(assignment) = self.pop(service_tasks_enabled) {
+                let (assignment, service_deadline) = self.pop(worker_id, service_tasks_enabled);
+                if let Some(assignment) = assignment {
                     return assignment;
                 }
-                notified.await;
+                if let Some(deadline) = service_deadline {
+                    let _ = tokio::time::timeout_at(deadline, notified).await;
+                } else {
+                    notified.await;
+                }
             }
         };
         tokio::time::timeout(polling_timeout, poll).await.ok()
     }
 
-    fn pop(&self, service_tasks_enabled: bool) -> Option<TaskAssignment> {
-        let (assignment, regular_size, service_size) = {
-            let mut state = self.state.lock();
-            let assignment = loop {
-                let Some(candidate) = state.queue.pop(service_tasks_enabled) else {
-                    break None;
-                };
-                let Some(ongoing) = state.ongoing.get_mut(&candidate.assignment_id) else {
-                    continue;
-                };
-                if !ongoing.queued {
-                    continue;
-                }
-                if ongoing.deadline <= tokio::time::Instant::now() {
-                    continue;
-                }
-                ongoing.queued = false;
-                break Some(candidate);
-            };
-            let (regular_size, service_size) = state.queue.sizes();
-            (assignment, regular_size, service_size)
+    fn pop(
+        &self,
+        worker_id: &str,
+        service_tasks_enabled: bool,
+    ) -> (Option<TaskAssignment>, Option<tokio::time::Instant>) {
+        let mut state = self.state.lock();
+        let service_deadline = match &state.service_assignment {
+            Some(service) if service.deadline <= tokio::time::Instant::now() => {
+                state.service_assignment = None;
+                self.task_available.notify_waiters();
+                None
+            },
+            Some(service) if service.worker_id == worker_id => return (None, Some(service.deadline)),
+            Some(service) => Some(service.deadline),
+            None => None,
         };
+        let service_tasks_enabled = service_tasks_enabled && service_deadline.is_none();
+        let assignment = loop {
+            let Some(candidate) = state.queue.pop(service_tasks_enabled) else {
+                break None;
+            };
+            let Some(ongoing) = state.ongoing.get_mut(&candidate.assignment_id) else {
+                continue;
+            };
+            if !ongoing.queued || ongoing.deadline <= tokio::time::Instant::now() {
+                continue;
+            }
+            ongoing.queued = false;
+            if candidate.service_task {
+                state.service_assignment = Some(ServiceAssignment {
+                    assignment_id: candidate.assignment_id,
+                    worker_id: worker_id.to_owned(),
+                    deadline: ongoing.deadline,
+                });
+            }
+            break Some(candidate);
+        };
+        let (regular_size, service_size) = state.queue.sizes();
+        drop(state);
         CoordinatorMetrics::set_queue_sizes(regular_size, service_size);
-        assignment
+        (assignment, service_deadline)
     }
 
     fn complete(&self, request: CompleteRequest) -> SyncCoreResult<()> {
@@ -214,19 +256,32 @@ impl Inner {
             .ok_or_else(|| SyncCoreError::invalid_args("completion outcome is missing"))?;
         let completion = {
             let mut state = self.state.lock();
-            let ongoing = state.ongoing.get(&request.assignment_id).ok_or_else(|| {
-                SyncCoreError::invalid_args(format!("assignment {} is stale or unknown", request.assignment_id))
-            })?;
-            if ongoing.queued {
-                return Err(SyncCoreError::logic(format!(
-                    "assignment {} was completed before dispatch",
-                    request.assignment_id
-                )));
+            if let Some(service) = &state.service_assignment
+                && service.assignment_id == request.assignment_id
+            {
+                if service.worker_id != request.worker_id {
+                    return Err(SyncCoreError::invalid_args("service assignment belongs to another worker"));
+                }
+                // A cancelled caller no longer accepts results, but its worker may
+                // still be running. Completion releases that reservation even when stale.
+                state.service_assignment = None;
+                self.task_available.notify_waiters();
             }
-            let ongoing = state.ongoing.remove(&request.assignment_id).ok_or_else(|| {
-                SyncCoreError::logic(format!("assignment {} disappeared during completion", request.assignment_id))
-            })?;
-            ongoing.completion
+            match state.ongoing.entry(request.assignment_id) {
+                Entry::Occupied(entry) if entry.get().queued => {
+                    return Err(SyncCoreError::logic(format!(
+                        "assignment {} was completed before dispatch",
+                        request.assignment_id
+                    )));
+                },
+                Entry::Occupied(entry) => entry.remove().completion,
+                Entry::Vacant(_) => {
+                    return Err(SyncCoreError::invalid_args(format!(
+                        "assignment {} is stale or unknown",
+                        request.assignment_id
+                    )));
+                },
+            }
         };
 
         let result = match outcome {
@@ -248,6 +303,8 @@ impl Inner {
         let queue_sizes = {
             let mut state = self.state.lock();
             let removed = state.ongoing.remove(&assignment_id);
+            // Keep a dispatched service reservation until its worker completes
+            // or its original deadline expires: cancellation is not an RPC.
             removed.filter(|task| task.queued).map(|_| {
                 state.queue.remove(assignment_id);
                 state.queue.sizes()
@@ -285,13 +342,11 @@ impl Drop for AssignmentGuard {
 #[cfg(test)]
 mod tests {
     use super::{Coordinator, TaskDeadline};
-    use crate::distributed_adapter::ErasedHandler;
     use crate::proto::CompleteRequest;
     use crate::proto::complete_request::Outcome;
     use crate::task::{EmptyTaskResult, RangeTask};
     use crate::task_server::TaskServiceImpl;
     use crate::traits::{DistributedHandler, TaskBatch};
-    use std::sync::Arc;
     use std::time::Duration;
     use stonfi_sync_core::errors::SyncCoreResult;
     use stonfi_sync_core::sync_engine::SyncHeight;
@@ -338,13 +393,13 @@ mod tests {
         init_test_metrics()?;
         let coordinator = Coordinator::new();
         let timeout = Duration::from_millis(100);
-        let handler: Arc<dyn ErasedHandler> = Arc::new(TestHandler(timeout));
+        let handler = TestHandler(timeout);
         let coordinator_for_task = coordinator.clone();
         let deadline = TaskDeadline::new(timeout);
-        let task = tokio::spawn(async move { coordinator_for_task.handle_task(handler, vec![1], deadline).await });
+        let task = tokio::spawn(async move { coordinator_for_task.handle_task(&handler, vec![1], deadline).await });
 
         let first = coordinator
-            .poll(Duration::from_secs(1), false)
+            .poll("worker", Duration::from_secs(1), false)
             .await
             .ok_or_else(|| anyhow::anyhow!("first assignment was not dispatched"))?;
         coordinator.complete(CompleteRequest {
@@ -353,9 +408,9 @@ mod tests {
             outcome: Some(Outcome::ErrorMessage("retry".to_owned())),
         })?;
 
-        assert!(coordinator.poll(Duration::from_millis(5), false).await.is_none());
+        assert!(coordinator.poll("worker", Duration::from_millis(5), false).await.is_none());
         let second = coordinator
-            .poll(Duration::from_secs(1), false)
+            .poll("worker", Duration::from_secs(1), false)
             .await
             .ok_or_else(|| anyhow::anyhow!("retried assignment was not dispatched"))?;
         assert_ne!(first.assignment_id, second.assignment_id);
@@ -375,10 +430,10 @@ mod tests {
         init_test_metrics()?;
         let coordinator = Coordinator::new();
         let timeout = Duration::from_millis(100);
-        let handler: Arc<dyn ErasedHandler> = Arc::new(TestHandler(timeout));
+        let handler = TestHandler(timeout);
         let coordinator_for_task = coordinator.clone();
         let deadline = TaskDeadline::new(timeout);
-        let task = tokio::spawn(async move { coordinator_for_task.handle_task(handler, vec![1], deadline).await });
+        let task = tokio::spawn(async move { coordinator_for_task.handle_task(&handler, vec![1], deadline).await });
 
         tokio::task::yield_now().await;
         task.abort();
@@ -386,7 +441,7 @@ mod tests {
         tokio::task::yield_now().await;
 
         assert_eq!(coordinator.queued_task_count(), 0);
-        assert!(coordinator.poll(Duration::from_millis(10), false).await.is_none());
+        assert!(coordinator.poll("worker", Duration::from_millis(10), false).await.is_none());
         Ok(())
     }
 
@@ -414,13 +469,13 @@ mod tests {
         init_test_metrics()?;
         let coordinator = Coordinator::new();
         let timeout = Duration::from_millis(100);
-        let handler: Arc<dyn ErasedHandler> = Arc::new(TestHandler(timeout));
+        let handler = TestHandler(timeout);
         let coordinator_for_task = coordinator.clone();
         let deadline = TaskDeadline::new(timeout);
-        let task = tokio::spawn(async move { coordinator_for_task.handle_task(handler, vec![1], deadline).await });
+        let task = tokio::spawn(async move { coordinator_for_task.handle_task(&handler, vec![1], deadline).await });
 
         let assignment = coordinator
-            .poll(Duration::from_secs(1), false)
+            .poll("worker", Duration::from_secs(1), false)
             .await
             .ok_or_else(|| anyhow::anyhow!("assignment was not dispatched"))?;
         assert!(task.await?.is_err());
@@ -442,18 +497,18 @@ mod tests {
         init_test_metrics()?;
         let coordinator = Coordinator::new();
         let timeout = Duration::from_secs(2);
-        let handler: Arc<dyn ErasedHandler> = Arc::new(TestHandler(timeout));
+        let handler = TestHandler(timeout);
         let coordinator_for_task = coordinator.clone();
         let deadline = TaskDeadline::new(timeout);
         let deadline_unix_ms = deadline.unix_ms;
-        let task = tokio::spawn(async move { coordinator_for_task.handle_task(handler, vec![1], deadline).await });
+        let task = tokio::spawn(async move { coordinator_for_task.handle_task(&handler, vec![1], deadline).await });
 
         while coordinator.queued_task_count() == 0 {
             tokio::task::yield_now().await;
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
         let assignment = coordinator
-            .poll(Duration::from_secs(1), false)
+            .poll("worker", Duration::from_secs(1), false)
             .await
             .ok_or_else(|| anyhow::anyhow!("assignment was not dispatched"))?;
 

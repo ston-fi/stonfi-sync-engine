@@ -17,6 +17,7 @@ anyhow = "1"
 async-trait = "0.1"
 bincode = { version = "2", features = ["derive"] }
 futures = "0.3"
+getrandom = "0.4"
 parking_lot = "0.12"
 prost = "0.14"
 prost-build = "0.14"

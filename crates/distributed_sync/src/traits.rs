@@ -109,6 +109,14 @@ pub trait DistributedHandler: Send + Sync + 'static {
 
     /// Returns whether tasks require exclusive execution on a service-capable
     /// worker.
+    ///
+    /// A coordinator dispatches only one service assignment across all its workers
+    /// until completion or the original deadline. Its owner receives no additional
+    /// tasks during that reservation; other workers can continue regular work.
+    /// Before a service task starts, that worker waits for its running regular
+    /// tasks to finish. While the service handler executes, no other handler
+    /// task, regular or service, may execute on the same worker. This protects
+    /// CPU-intensive service work; it does not create additional worker capacity.
     fn is_service_task(&self) -> bool {
         false
     }

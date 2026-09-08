@@ -1,11 +1,9 @@
-use super::{Inner, Worker};
-use crate::distributed_adapter::ErasedHandler;
+use super::{ErasedHandler, Inner, Worker};
 use crate::traits::DistributedHandler;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use stonfi_sync_core::errors::{SyncCoreError, SyncCoreResult};
 use tokio::sync::Semaphore;
@@ -14,8 +12,6 @@ use tonic::transport::Endpoint;
 const DEFAULT_POLLING_TIMEOUT: Duration = Duration::from_secs(1);
 const DEFAULT_RECONNECT_DELAY: Duration = Duration::from_secs(1);
 const DEFAULT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
-
-static WORKER_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Builder for [`Worker`].
 #[non_exhaustive]
@@ -52,6 +48,11 @@ impl Builder {
     }
 
     /// Enables or disables polling for service tasks.
+    ///
+    /// All polling loops share this eligibility. The coordinator dispatches at
+    /// most one service assignment across its workers and pauses further dispatch
+    /// to its owner until completion or deadline. Service execution still owns
+    /// all worker task permits exclusively; other workers can process regular tasks.
     #[must_use]
     pub fn with_service_tasks_enabled(mut self, enabled: bool) -> Self {
         self.service_tasks_enabled = enabled;
@@ -112,7 +113,7 @@ impl Builder {
     /// # Errors
     ///
     /// Returns an error for invalid transport configuration, an unavailable CPU
-    /// parallelism value, identifier exhaustion, or no handlers.
+    /// parallelism value, unavailable randomness for worker identity, or no handlers.
     pub fn build(self) -> SyncCoreResult<Worker> {
         if self.handlers.is_empty() {
             return Err(SyncCoreError::invalid_args("worker requires at least one handler"));
@@ -135,14 +136,15 @@ impl Builder {
         }
         let parallelism_u32 = u32::try_from(parallelism.get())
             .map_err(|_| SyncCoreError::invalid_args("worker parallelism exceeds u32"))?;
-        let worker_counter = WORKER_COUNTER
-            .try_update(Ordering::Relaxed, Ordering::Relaxed, |current| current.checked_add(1))
-            .map(|previous| previous + 1)
-            .map_err(|_| SyncCoreError::logic("worker ID counter exhausted"))?;
+        // Process IDs and counters collide across containers. All polling loops
+        // need one identity that also distinguishes independently built workers.
+        let mut worker_id = [0; 16];
+        getrandom::fill(&mut worker_id).map_err(SyncCoreError::system)?;
+        let worker_id = format!("worker-{:032x}", u128::from_be_bytes(worker_id));
 
         Ok(Worker {
             inner: Arc::new(Inner {
-                worker_id: format!("worker-{}-{worker_counter}", std::process::id()),
+                worker_id,
                 endpoint,
                 service_tasks_enabled: self.service_tasks_enabled,
                 polling_timeout: self.polling_timeout,

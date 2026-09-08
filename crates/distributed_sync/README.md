@@ -98,20 +98,44 @@ durations are truncated to whole milliseconds on the wire; values larger than
   `handle_results` retain task-creation order.
 - An empty task batch is valid. Its height advances after `handle_results`
   accepts the empty result list.
-- A service-capable worker selects the service queue first and falls back to
-  regular work. Within the selected queue, higher-priority tasks are dispatched
-  first, with FIFO ordering within one priority.
+- The coordinator dispatches **at most one service assignment across all its
+  workers**, including waiting for worker capacity, execution, and completion
+  reporting. Further service tasks stay queued. The assigned worker receives no
+  additional tasks while that reservation is active; other workers continue
+  regular work. Assignments already dispatched to the owner may finish.
+- Every polling loop uses its worker's service eligibility. When the service
+  slot is free, eligible polls select the service queue before the regular queue.
+  Within each queue, higher priority dispatches first and equal priorities are
+  FIFO. The coordinator owns this limit; workers need no separate service poller
+  or per-process service counter. Independent coordinators do not share the limit.
+- Completion releases the service reservation. Cancelling the coordinator's
+  caller invalidates the result but retains the reservation until worker completion
+  or the original assignment deadline, because cancellation does not stop the
+  remote handler. Deadline expiry also frees reservations after worker failure or
+  lost completion, without requiring another task to arrive. This is an assignment
+  limit, not a distributed execution lock: handlers must honor cooperative
+  cancellation and deadlines, and hosts must have synchronized clocks.
 - Except for service-task eligibility, the coordinator does not filter tasks
   by worker capability. A worker without the assigned handler reports a
   retryable failure.
 - A service task waits for exclusive access to that worker's configured task
-  capacity. Idle long-polls do not consume processing capacity.
+  capacity: running regular tasks finish before it starts, and no regular or
+  other service handler executes on that worker until the service handler
+  finishes or is cancelled. This is intended for CPU-intensive maintenance work.
+  Service support does not add a separate execution pool. Idle long-polls do not
+  consume processing capacity.
 - Failed worker attempts wait for the handler's `retry_delay()` backoff
   before retrying. Task creation, queueing, worker capacity waits, and
   processing share the enclosing synchronization deadline.
 - One synchronization range keeps at most 10,000 coordinator task futures in
   flight. New tasks are admitted as earlier tasks finish, while the original
   deadline and task-creation result order are preserved.
+
+Each worker build generates a random identity shared by its polling loops and
+reused across reconnects. Upgrade both the coordinator and all workers for this
+scheduling behavior: older workers use process IDs and counters that can collide
+across containers, causing the coordinator to pause unrelated workers together.
+The protobuf fields and public construction API are unchanged.
 
 ## Lifecycle
 

@@ -347,7 +347,7 @@ fn test_duplicate_handler_registration_is_rejected() -> anyhow::Result<()> {
 async fn setup<H>(
     coordinator_handler: H,
     worker_handler: H,
-) -> anyhow::Result<(DistributedAdapter, WorkerRunHandle, TaskServerRunHandle)>
+) -> anyhow::Result<(DistributedAdapter<H>, WorkerRunHandle, TaskServerRunHandle)>
 where
     H: DistributedHandler,
 {
