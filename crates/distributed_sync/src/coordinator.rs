@@ -12,6 +12,7 @@ use metrics::{CoordinatorMetrics, CoordinatorTaskStatus};
 use parking_lot::Mutex;
 use queue::TaskQueue;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
@@ -81,21 +82,6 @@ struct ServiceAssignment {
     assignment_id: u64,
     worker_id: String,
     deadline: tokio::time::Instant,
-}
-
-impl State {
-    fn release_service_assignment(&mut self, assignment_id: u64, worker_id: &str) -> bool {
-        if self
-            .service_assignment
-            .as_ref()
-            .is_some_and(|service| service.assignment_id == assignment_id && service.worker_id == worker_id)
-        {
-            self.service_assignment = None;
-            true
-        } else {
-            false
-        }
-    }
 }
 
 struct OngoingTask {
@@ -226,53 +212,42 @@ impl Inner {
         worker_id: &str,
         service_tasks_enabled: bool,
     ) -> (Option<TaskAssignment>, Option<tokio::time::Instant>) {
-        let (assignment, regular_size, service_size) = {
-            let mut state = self.state.lock();
-            if state
-                .service_assignment
-                .as_ref()
-                .is_some_and(|service| service.deadline <= tokio::time::Instant::now())
-            {
+        let mut state = self.state.lock();
+        let service_deadline = match &state.service_assignment {
+            Some(service) if service.deadline <= tokio::time::Instant::now() => {
                 state.service_assignment = None;
                 self.task_available.notify_waiters();
-            }
-            let service_deadline = state.service_assignment.as_ref().map(|service| service.deadline);
-            if state
-                .service_assignment
-                .as_ref()
-                .is_some_and(|service| service.worker_id == worker_id)
-            {
-                return (None, service_deadline);
-            }
-            let service_tasks_enabled = service_tasks_enabled && state.service_assignment.is_none();
-            let assignment = loop {
-                let Some(candidate) = state.queue.pop(service_tasks_enabled) else {
-                    break None;
-                };
-                let Some(ongoing) = state.ongoing.get_mut(&candidate.assignment_id) else {
-                    continue;
-                };
-                if !ongoing.queued {
-                    continue;
-                }
-                if ongoing.deadline <= tokio::time::Instant::now() {
-                    continue;
-                }
-                ongoing.queued = false;
-                if candidate.service_task {
-                    state.service_assignment = Some(ServiceAssignment {
-                        assignment_id: candidate.assignment_id,
-                        worker_id: worker_id.to_owned(),
-                        deadline: ongoing.deadline,
-                    });
-                }
-                break Some(candidate);
-            };
-            let (regular_size, service_size) = state.queue.sizes();
-            ((assignment, service_deadline), regular_size, service_size)
+                None
+            },
+            Some(service) if service.worker_id == worker_id => return (None, Some(service.deadline)),
+            Some(service) => Some(service.deadline),
+            None => None,
         };
+        let service_tasks_enabled = service_tasks_enabled && service_deadline.is_none();
+        let assignment = loop {
+            let Some(candidate) = state.queue.pop(service_tasks_enabled) else {
+                break None;
+            };
+            let Some(ongoing) = state.ongoing.get_mut(&candidate.assignment_id) else {
+                continue;
+            };
+            if !ongoing.queued || ongoing.deadline <= tokio::time::Instant::now() {
+                continue;
+            }
+            ongoing.queued = false;
+            if candidate.service_task {
+                state.service_assignment = Some(ServiceAssignment {
+                    assignment_id: candidate.assignment_id,
+                    worker_id: worker_id.to_owned(),
+                    deadline: ongoing.deadline,
+                });
+            }
+            break Some(candidate);
+        };
+        let (regular_size, service_size) = state.queue.sizes();
+        drop(state);
         CoordinatorMetrics::set_queue_sizes(regular_size, service_size);
-        assignment
+        (assignment, service_deadline)
     }
 
     fn complete(&self, request: CompleteRequest) -> SyncCoreResult<()> {
@@ -281,29 +256,32 @@ impl Inner {
             .ok_or_else(|| SyncCoreError::invalid_args("completion outcome is missing"))?;
         let completion = {
             let mut state = self.state.lock();
-            if state.service_assignment.as_ref().is_some_and(|service| {
-                service.assignment_id == request.assignment_id && service.worker_id != request.worker_id
-            }) {
-                return Err(SyncCoreError::invalid_args("service assignment belongs to another worker"));
-            }
-            // A cancelled caller no longer accepts results, but its worker may
-            // still be running. Completion releases that reservation even when stale.
-            if state.release_service_assignment(request.assignment_id, &request.worker_id) {
+            if let Some(service) = &state.service_assignment
+                && service.assignment_id == request.assignment_id
+            {
+                if service.worker_id != request.worker_id {
+                    return Err(SyncCoreError::invalid_args("service assignment belongs to another worker"));
+                }
+                // A cancelled caller no longer accepts results, but its worker may
+                // still be running. Completion releases that reservation even when stale.
+                state.service_assignment = None;
                 self.task_available.notify_waiters();
             }
-            let ongoing = state.ongoing.get(&request.assignment_id).ok_or_else(|| {
-                SyncCoreError::invalid_args(format!("assignment {} is stale or unknown", request.assignment_id))
-            })?;
-            if ongoing.queued {
-                return Err(SyncCoreError::logic(format!(
-                    "assignment {} was completed before dispatch",
-                    request.assignment_id
-                )));
+            match state.ongoing.entry(request.assignment_id) {
+                Entry::Occupied(entry) if entry.get().queued => {
+                    return Err(SyncCoreError::logic(format!(
+                        "assignment {} was completed before dispatch",
+                        request.assignment_id
+                    )));
+                },
+                Entry::Occupied(entry) => entry.remove().completion,
+                Entry::Vacant(_) => {
+                    return Err(SyncCoreError::invalid_args(format!(
+                        "assignment {} is stale or unknown",
+                        request.assignment_id
+                    )));
+                },
             }
-            let ongoing = state.ongoing.remove(&request.assignment_id).ok_or_else(|| {
-                SyncCoreError::logic(format!("assignment {} disappeared during completion", request.assignment_id))
-            })?;
-            ongoing.completion
         };
 
         let result = match outcome {
