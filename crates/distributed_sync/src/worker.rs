@@ -3,9 +3,9 @@ mod grpc_client;
 mod metrics;
 mod progress_log;
 
-use crate::distributed_adapter::ErasedHandler;
 use crate::proto::complete_request::Outcome;
 use crate::proto::{CompleteRequest, TaskAssignment};
+use crate::traits::{DistributedHandler, TaskPayload};
 use crate::utils::deadline_from_unix_millis;
 use builder::Builder;
 use futures::stream::{FuturesUnordered, StreamExt};
@@ -211,8 +211,8 @@ async fn task_completion(
         ProcessingPermit::Stopped => return None,
     };
 
-    let completion = process_assignment(inner, assignment, started_at, task_deadline).await;
-    Some(completion)
+    let outcome = process_outcome(inner, &assignment, started_at, task_deadline).await;
+    Some(completion_request(&inner.worker_id, assignment.assignment_id, outcome))
 }
 
 async fn connect(inner: &Inner, cancellation: &CancellationToken) -> Option<GrpcClient> {
@@ -267,18 +267,6 @@ enum ProcessingPermit {
     Stopped,
 }
 
-async fn process_assignment(
-    inner: &Inner,
-    assignment: TaskAssignment,
-    started_at: Instant,
-    task_deadline: tokio::time::Instant,
-) -> CompleteRequest {
-    let id = assignment.handler_id.clone();
-    let outcome = process_outcome(inner, &assignment, &id, started_at, task_deadline).await;
-
-    completion_request(&inner.worker_id, assignment.assignment_id, outcome)
-}
-
 fn completion_request(worker_id: &str, assignment_id: u64, outcome: Outcome) -> CompleteRequest {
     CompleteRequest {
         worker_id: worker_id.to_owned(),
@@ -290,10 +278,10 @@ fn completion_request(worker_id: &str, assignment_id: u64, outcome: Outcome) -> 
 async fn process_outcome(
     inner: &Inner,
     assignment: &TaskAssignment,
-    id: &str,
     started_at: Instant,
     task_deadline: tokio::time::Instant,
 ) -> Outcome {
+    let id = &assignment.handler_id;
     let Some(handler) = inner.handlers.get(id) else {
         WorkerMetrics::task(id, WorkerTaskStatus::Failed, started_at.elapsed());
         return Outcome::ErrorMessage(format!("worker has no handler '{id}'"));
@@ -315,13 +303,28 @@ async fn process_outcome(
     }
 }
 
+// Worker dispatch erases only the task codec and processing operation.
+#[async_trait::async_trait]
+trait ErasedHandler: Send + Sync {
+    async fn process_task_bytes(&self, task_payload: &[u8]) -> SyncCoreResult<Vec<u8>>;
+}
+
+#[async_trait::async_trait]
+impl<H: DistributedHandler> ErasedHandler for H {
+    async fn process_task_bytes(&self, task_payload: &[u8]) -> SyncCoreResult<Vec<u8>> {
+        let task = H::Task::decode(task_payload)?;
+        self.process_task(task).await?.encode()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        Inner, ProcessingPermit, Worker, WorkerRunHandle, process_outcome, processing_permit, task_completion,
+        ErasedHandler, Inner, ProcessingPermit, Worker, WorkerRunHandle, process_outcome, processing_permit,
+        task_completion,
     };
     use crate::coordinator::Coordinator;
-    use crate::distributed_adapter::{DistributedAdapter, ErasedHandler};
+    use crate::distributed_adapter::DistributedAdapter;
     use crate::proto::TaskAssignment;
     use crate::proto::complete_request::Outcome;
     use crate::task::{EmptyTaskResult, RangeTask};
@@ -494,7 +497,6 @@ mod tests {
         let outcome = process_outcome(
             &inner,
             &assignment,
-            "unregistered",
             std::time::Instant::now(),
             tokio::time::Instant::now() + timeout,
         )

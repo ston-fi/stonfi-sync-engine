@@ -1,5 +1,4 @@
-use super::{Inner, Worker};
-use crate::distributed_adapter::ErasedHandler;
+use super::{ErasedHandler, Inner, Worker};
 use crate::traits::DistributedHandler;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;

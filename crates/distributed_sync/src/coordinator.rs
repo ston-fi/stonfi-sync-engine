@@ -5,9 +5,9 @@ mod types;
 pub(crate) use types::TaskDeadline;
 pub use types::TaskPriority;
 
-use crate::distributed_adapter::ErasedHandler;
 use crate::proto::complete_request::Outcome;
 use crate::proto::{CompleteRequest, TaskAssignment};
+use crate::traits::DistributedHandler;
 use metrics::{CoordinatorMetrics, CoordinatorTaskStatus};
 use parking_lot::Mutex;
 use queue::TaskQueue;
@@ -38,7 +38,7 @@ impl Coordinator {
 
     pub(crate) async fn handle_task(
         &self,
-        handler: Arc<dyn ErasedHandler>,
+        handler: &impl DistributedHandler,
         payload: Vec<u8>,
         deadline: TaskDeadline,
     ) -> SyncCoreResult<Vec<u8>> {
@@ -93,7 +93,7 @@ struct OngoingTask {
 impl Inner {
     async fn handle_task(
         self: &Arc<Self>,
-        handler: Arc<dyn ErasedHandler>,
+        handler: &impl DistributedHandler,
         payload: Vec<u8>,
         deadline: TaskDeadline,
     ) -> SyncCoreResult<Vec<u8>> {
@@ -342,13 +342,11 @@ impl Drop for AssignmentGuard {
 #[cfg(test)]
 mod tests {
     use super::{Coordinator, TaskDeadline};
-    use crate::distributed_adapter::ErasedHandler;
     use crate::proto::CompleteRequest;
     use crate::proto::complete_request::Outcome;
     use crate::task::{EmptyTaskResult, RangeTask};
     use crate::task_server::TaskServiceImpl;
     use crate::traits::{DistributedHandler, TaskBatch};
-    use std::sync::Arc;
     use std::time::Duration;
     use stonfi_sync_core::errors::SyncCoreResult;
     use stonfi_sync_core::sync_engine::SyncHeight;
@@ -395,10 +393,10 @@ mod tests {
         init_test_metrics()?;
         let coordinator = Coordinator::new();
         let timeout = Duration::from_millis(100);
-        let handler: Arc<dyn ErasedHandler> = Arc::new(TestHandler(timeout));
+        let handler = TestHandler(timeout);
         let coordinator_for_task = coordinator.clone();
         let deadline = TaskDeadline::new(timeout);
-        let task = tokio::spawn(async move { coordinator_for_task.handle_task(handler, vec![1], deadline).await });
+        let task = tokio::spawn(async move { coordinator_for_task.handle_task(&handler, vec![1], deadline).await });
 
         let first = coordinator
             .poll("worker", Duration::from_secs(1), false)
@@ -432,10 +430,10 @@ mod tests {
         init_test_metrics()?;
         let coordinator = Coordinator::new();
         let timeout = Duration::from_millis(100);
-        let handler: Arc<dyn ErasedHandler> = Arc::new(TestHandler(timeout));
+        let handler = TestHandler(timeout);
         let coordinator_for_task = coordinator.clone();
         let deadline = TaskDeadline::new(timeout);
-        let task = tokio::spawn(async move { coordinator_for_task.handle_task(handler, vec![1], deadline).await });
+        let task = tokio::spawn(async move { coordinator_for_task.handle_task(&handler, vec![1], deadline).await });
 
         tokio::task::yield_now().await;
         task.abort();
@@ -471,10 +469,10 @@ mod tests {
         init_test_metrics()?;
         let coordinator = Coordinator::new();
         let timeout = Duration::from_millis(100);
-        let handler: Arc<dyn ErasedHandler> = Arc::new(TestHandler(timeout));
+        let handler = TestHandler(timeout);
         let coordinator_for_task = coordinator.clone();
         let deadline = TaskDeadline::new(timeout);
-        let task = tokio::spawn(async move { coordinator_for_task.handle_task(handler, vec![1], deadline).await });
+        let task = tokio::spawn(async move { coordinator_for_task.handle_task(&handler, vec![1], deadline).await });
 
         let assignment = coordinator
             .poll("worker", Duration::from_secs(1), false)
@@ -499,11 +497,11 @@ mod tests {
         init_test_metrics()?;
         let coordinator = Coordinator::new();
         let timeout = Duration::from_secs(2);
-        let handler: Arc<dyn ErasedHandler> = Arc::new(TestHandler(timeout));
+        let handler = TestHandler(timeout);
         let coordinator_for_task = coordinator.clone();
         let deadline = TaskDeadline::new(timeout);
         let deadline_unix_ms = deadline.unix_ms;
-        let task = tokio::spawn(async move { coordinator_for_task.handle_task(handler, vec![1], deadline).await });
+        let task = tokio::spawn(async move { coordinator_for_task.handle_task(&handler, vec![1], deadline).await });
 
         while coordinator.queued_task_count() == 0 {
             tokio::task::yield_now().await;

@@ -11,11 +11,13 @@ The package connects `stonfi_sync_core` to remote gRPC workers:
 
 - `DistributedHandler` defines typed task creation, task execution, and
   ordered result handling.
-- The private `DistributedAdapter` adapts a handler to `SyncHandler`.
+- The private `DistributedAdapter` owns a typed handler and adapts it to
+  `SyncHandler`; task encoding and ordered result decoding stay in that adapter.
 - `Coordinator` owns the in-memory priority queues and in-flight completions.
 - `TaskServer` exposes those queues through the private versioned protobuf API.
 - `Worker` polls, routes, processes, and completes tasks with bounded lifecycle
-  ownership.
+  ownership. Its private erased handler interface contains only byte processing;
+  coordinator-side code uses `DistributedHandler` directly.
 
 The crate does not provide persistent queues, distributed locking, multi-writer
 status coordination, authentication, TLS, forwarding, reflection, deployment
