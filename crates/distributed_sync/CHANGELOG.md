@@ -5,6 +5,14 @@ here.
 
 ## [Unreleased]
 
+## [0.3.1](https://github.com/ston-fi/stonfi-sync-engine/compare/stonfi_distributed_sync-v0.3.0...stonfi_distributed_sync-v0.3.1) - 2026-09-08
+
+### Other
+
+- simplify handler ownership and dispatch
+- simplify service scheduling control flow
+- serialize service assignments across workers
+
 ### Fixed
 
 - Serialize service assignments across all workers of a coordinator and pause
